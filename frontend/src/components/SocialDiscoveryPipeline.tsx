@@ -29,8 +29,11 @@ export function SocialDiscoveryPipeline() {
   const hintInputRef = useRef<HTMLInputElement>(null);
 
   const focusHint = () => {
+    // The field is either inside a <details> (reverse-image mode) or rendered
+    // inline (hint-required mode); handle both.
     if (hintDetailsRef.current) hintDetailsRef.current.open = true;
-    hintDetailsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const target = hintInputRef.current ?? hintDetailsRef.current;
+    target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     window.setTimeout(() => hintInputRef.current?.focus(), 350);
   };
   const [loading, setLoading] = useState<boolean>(false);
@@ -301,29 +304,35 @@ export function SocialDiscoveryPipeline() {
               </div>
             </div>
 
-            {/* Optional Collapsible Filter for edge cases (hidden by default) */}
-            <details ref={hintDetailsRef} style={{ marginTop: '0.75rem' }}>
-              <summary style={{
-                fontSize: '0.75rem',
-                color: caps && !caps.reverse_image_available ? '#e8c46a' : 'rgba(255,255,255,0.44)',
-                cursor: 'pointer',
-                outline: 'none',
-              }}>
-                {caps?.reverse_image_available
-                  ? 'Optional Search Hint (leave blank for pure face-driven search)'
-                  : 'Search Hint — required: a name or handle to seed discovery'}
-              </summary>
-              <div style={{ marginTop: '0.4rem' }}>
+            {/* The hint is only genuinely optional when a reverse-image
+                provider is configured. Without one it is required, so it is
+                shown expanded and labelled as such - collapsing it behind a
+                <details> summary made it easy to miss, and a blank hint then
+                produces a search that cannot possibly succeed. */}
+            {caps && !caps.reverse_image_available ? (
+              <div style={{ marginTop: '0.75rem' }}>
+                <label
+                  htmlFor="search-hint"
+                  style={{
+                    display: 'block',
+                    fontSize: '0.75rem',
+                    color: '#e8c46a',
+                    marginBottom: '0.35rem',
+                  }}
+                >
+                  Search hint &mdash; required
+                </label>
                 <input
+                  id="search-hint"
                   ref={hintInputRef}
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Optional: specific handle or post URL"
+                  placeholder="Name, handle or post URL, e.g. Triggered Insaan"
                   style={{
                     width: '100%',
                     background: '#171a13',
-                    border: '1px solid #2c3125',
+                    border: `1px solid ${searchQuery.trim() ? '#2c3125' : 'rgba(232, 196, 106, 0.45)'}`,
                     color: '#f4f6f0',
                     padding: '0.5rem 0.75rem',
                     borderRadius: '6px',
@@ -332,8 +341,41 @@ export function SocialDiscoveryPipeline() {
                     outline: 'none',
                   }}
                 />
+                {!searchQuery.trim() && (
+                  <div style={{ marginTop: '0.35rem', fontSize: '0.72rem', color: 'rgba(255,255,255,0.44)', lineHeight: 1.5 }}>
+                    Leave this blank and the search has nothing to query &mdash; the run will
+                    return <strong>0 candidates</strong>. Enter a public name or handle; every
+                    result is still verified against your face.
+                  </div>
+                )}
               </div>
-            </details>
+            ) : (
+              <details ref={hintDetailsRef} style={{ marginTop: '0.75rem' }}>
+                <summary style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.44)', cursor: 'pointer', outline: 'none' }}>
+                  Optional search hint (leave blank for pure face-driven search)
+                </summary>
+                <div style={{ marginTop: '0.4rem' }}>
+                  <input
+                    ref={hintInputRef}
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Optional: specific handle or post URL"
+                    style={{
+                      width: '100%',
+                      background: '#171a13',
+                      border: '1px solid #2c3125',
+                      color: '#f4f6f0',
+                      padding: '0.5rem 0.75rem',
+                      borderRadius: '6px',
+                      fontSize: '0.8rem',
+                      boxSizing: 'border-box',
+                      outline: 'none',
+                    }}
+                  />
+                </div>
+              </details>
+            )}
           </div>
 
           <button
