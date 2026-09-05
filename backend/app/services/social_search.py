@@ -13,12 +13,21 @@ from PIL import Image
 from bs4 import BeautifulSoup
 
 from app.services.face_processor import (
-    decode_base64_image, detect_faces, crop_face_region,
-    generate_128d_embedding, evaluate_face_similarity, encode_image_to_base64,
-    compute_euclidean_distance
+    decode_base64_image, detect_faces, detect_faces_detailed, crop_face_region,
+    embed_primary_face, encode_face, feature_to_list, evaluate_face_similarity,
+    encode_image_to_base64, describe_pipeline, SFACE_L2_THRESHOLD
 )
+from app.services.face_search import discover_matching_post, search_capabilities
 from app.services.hashing import generate_canonical_hash
 from app.services.blockchain import submit_record_hash_to_blockchain, query_verification_record
+
+class NoMatchFound(Exception):
+    """Discovery completed and genuinely found nothing. Not an error condition."""
+
+    def __init__(self, message: str, discovery: Optional[Dict[str, Any]] = None):
+        super().__init__(message)
+        self.discovery = discovery or {}
+
 
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 WIKI_HEADERS = {"User-Agent": "TalesOfGoaTask3Bot/1.0 (contact: support@talesofgoa.local) EducationalProject"}
@@ -218,218 +227,157 @@ async def discover_real_social_post(query: str) -> Optional[Dict[str, Any]]:
     except Exception as e:
         print(f"[Social Search] DDGS search notice: {e}")
 
-AUTONOMOUS_CANDIDATE_POOL = [
-    {
-        "query": "https://github.com/adityatomar4877-rgb",
-        "author": "adityatomar4877-rgb",
-        "platform": "GitHub",
-        "avatar_url": "https://github.com/adityatomar4877-rgb.png",
-        "post_url": "https://github.com/adityatomar4877-rgb",
-        "title": "Aditya Tomar (@adityatomar4877-rgb) - GitHub Profile",
-        "description": "Public developer profile & projects for Aditya Tomar on GitHub."
-    },
-    {
-        "query": "Linus Torvalds",
-        "author": "Linus Torvalds",
-        "platform": "GitHub",
-        "avatar_url": "https://avatars.githubusercontent.com/u/1024025?v=4",
-        "post_url": "https://github.com/torvalds",
-        "title": "Linus Torvalds (@torvalds) - GitHub Profile",
-        "description": "Creator of Linux and Git, open source advocate and software engineer."
-    },
-    {
-        "query": "Guillermo Rauch",
-        "author": "Guillermo Rauch",
-        "platform": "GitHub",
-        "avatar_url": "https://avatars.githubusercontent.com/u/13041?v=4",
-        "post_url": "https://github.com/rauchg",
-        "title": "Guillermo Rauch (@rauchg) - Vercel / Next.js",
-        "description": "CEO and founder of Vercel, creator of Next.js and Socket.io."
-    },
-    {
-        "query": "Guido van Rossum",
-        "author": "Guido van Rossum",
-        "platform": "GitHub",
-        "avatar_url": "https://avatars.githubusercontent.com/u/152585?v=4",
-        "post_url": "https://github.com/gvanrossum",
-        "title": "Guido van Rossum (@gvanrossum) - Python Creator",
-        "description": "Benevolent Dictator for Life of Python Programming Language."
-    },
-    {
-        "query": "Elon Musk",
-        "author": "Elon Musk",
-        "platform": "Wikipedia / Web",
-        "avatar_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/e/ed/Elon_Musk_Royal_Society.jpg/600px-Elon_Musk_Royal_Society.jpg",
-        "post_url": "https://en.wikipedia.org/wiki/Elon_Musk",
-        "title": "Elon Musk - Public Verified Identity",
-        "description": "Founder, CEO and chief engineer of SpaceX; angel investor, CEO of Tesla."
-    }
-]
-
-async def discover_face_across_web(scan_crop: np.ndarray, scan_embedding: np.ndarray, threshold: float = 1.0) -> Optional[Dict[str, Any]]:
-    """
-    Autonomous visual search across real social platforms (GitHub, Twitter/X, Wikimedia):
-    1. Iterates through live public candidate profiles/posts with authentic faces.
-    2. Computes the 128D biometric Euclidean distance (SFace DNN) against the input face.
-    3. Returns the real matching social post ONLY if distance is below threshold.
-    Uses SFace DNN embeddings for genuine face identity comparison.
-    """
-    best_candidate = None
-    min_dist = float("inf")
-
-    print(f"\n[Face Search] Starting autonomous face discovery across {len(AUTONOMOUS_CANDIDATE_POOL)} candidates (threshold={threshold})")
-
-    for candidate in AUTONOMOUS_CANDIDATE_POOL:
-        img_data = await fetch_image_and_detect_face(candidate["avatar_url"])
-        if img_data:
-            raw_bytes, bgr_array, boxes = img_data
-            if boxes:
-                c_crop = crop_face_region(bgr_array, boxes[0])
-                c_emb = generate_128d_embedding(c_crop)
-            else:
-                c_emb = generate_128d_embedding(bgr_array)
-
-            dist = compute_euclidean_distance(scan_embedding, c_emb)
-            cos_sim = float(np.dot(np.array(scan_embedding), np.array(c_emb)))
-            print(f"  [Face Search] {candidate['author']:25s} -> L2 dist={dist:.4f}, cos_sim={cos_sim:.4f}")
-
-            if dist < min_dist:
-                min_dist = dist
-                best_candidate = {
-                    "post_url": candidate["post_url"],
-                    "platform": candidate["platform"],
-                    "author": candidate["author"],
-                    "title": candidate["title"],
-                    "description": candidate["description"],
-                    "image_url": candidate["avatar_url"],
-                    "image_bytes": raw_bytes,
-                    "image_bgr": bgr_array,
-                    "boxes": boxes
-                }
-
-    # Only return a match if the best distance is below the threshold
-    if best_candidate and min_dist <= threshold:
-        print(f"  [Face Search] [MATCH] {best_candidate['author']} (dist={min_dist:.4f} <= {threshold})")
-        return best_candidate
-    else:
-        author_name = best_candidate['author'] if best_candidate else 'none'
-        print(f"  [Face Search] [NO MATCH] closest was {author_name} (dist={min_dist:.4f} > {threshold})")
-        return None
+# The hardcoded AUTONOMOUS_CANDIDATE_POOL that used to sit here - five fixed
+# people (a collaborator's GitHub, Torvalds, Rauchg, Guido van Rossum, Musk) -
+# has been deleted. It was not a search: it downloaded five known avatars and
+# returned whichever was nearest, which is how an unrelated face 'discovered'
+# Guido van Rossum. Real discovery now lives in app/services/face_search.py,
+# where every candidate comes from a live query and must pass the biometric
+# check before it can be returned.
 
 async def run_social_search_and_verification_pipeline(
     face_input_b64: str,
     search_query: str = "",
-    threshold: float = 1.0
+    threshold: float = SFACE_L2_THRESHOLD
 ) -> Dict[str, Any]:
     """
-    Executes HH GOA Task 3 end-to-end pipeline:
-    1. Face Scan Input -> Detect & Encode Face (128D Embedding)
-    2. Search Web & Social Media -> Discovers real matching post autonomously from face (or query if provided)
-    3. Biometric Comparison -> Evaluates Euclidean distance & Cosine similarity
-    4. Blockchain Upload -> Commits SHA-256 fingerprint to EVM contract
-    5. On-Chain Re-Verification -> Verifies tamper-evident proof
+    HH GOA Task 3, end to end:
+
+      1. Face scan  -> YuNet detect, SFace alignCrop, SFace 128-D feature
+      2. Discovery  -> live reverse-image or live face-gated search
+      3. Verify     -> every candidate face embedded and compared; a candidate
+                       is returned ONLY if it passes the SFace threshold
+      4. Fingerprint-> SHA-256 over the canonical record
+      5. Blockchain -> commit, then read back and re-verify
+
+    Raises ValueError with an explicit "no match" message when discovery finds
+    nothing. It never substitutes a stand-in identity to make the run look
+    successful.
     """
-    # 1. Process Input Face Scan
+    # ── 1. Input face ────────────────────────────────────────────────────
     scan_bgr = decode_base64_image(face_input_b64)
-    scan_boxes, img_w, img_h = detect_faces(scan_bgr)
+    scan = embed_primary_face(scan_bgr)          # raises if no face present
+    scan_diag = describe_pipeline(scan_bgr, scan, "input_scan")
+    print(f"[Pipeline] input scan: {scan_diag}")
 
-    if not scan_boxes:
-        raise ValueError("No face detected in input scan image. Please provide a clear face photo.")
+    scan_embedding = scan["embedding"]
+    scan_crop_b64 = encode_image_to_base64(scan["display_crop"])
+    _, scan_jpeg = cv2.imencode(".jpg", scan_bgr)
 
-    scan_crop = crop_face_region(scan_bgr, scan_boxes[0])
-    scan_embedding = generate_128d_embedding(scan_crop)
-    scan_crop_b64 = encode_image_to_base64(scan_crop)
-
-    # 2. Discover Real Social Media Post
-    clean_query = search_query.strip()
-    if clean_query:
-        discovered_post = await discover_real_social_post(clean_query)
-    else:
-        # Autonomous Face-Driven Web Discovery (no name query needed)
-        discovered_post = await discover_face_across_web(scan_crop, scan_embedding, threshold=threshold)
-
-    if not discovered_post:
-        raise ValueError("Could not locate any matching public social media post or profile with face images.")
-
-    # 3. Biometric 1-to-1 Facial Comparison
-    post_bgr = discovered_post["image_bgr"]
-    post_boxes = discovered_post["boxes"]
-
-    if post_boxes:
-        post_crop = crop_face_region(post_bgr, post_boxes[0])
-        post_embedding = generate_128d_embedding(post_crop)
-        post_crop_b64 = encode_image_to_base64(post_crop)
-    else:
-        post_embedding = generate_128d_embedding(post_bgr)
-        post_crop_b64 = encode_image_to_base64(post_bgr)
-
-    # Genuine biometric metrics
-    is_match, sim_pct, euc_dist, cos_sim = evaluate_face_similarity(
-        scan_embedding, post_embedding, threshold=threshold
+    # ── 2 + 3. Discovery, with the face check deciding the outcome ───────
+    discovery = await discover_matching_post(
+        scan_embedding=scan_embedding,
+        scan_image_bytes=scan_jpeg.tobytes(),
+        query=search_query.strip(),
+        l2_threshold=threshold,
     )
 
-    # 4. Generate Deterministic Canonical Record & Fingerprint
+    match = discovery["match"]
+    if match is None:
+        detail = discovery.get("note") or (
+            f"{discovery['candidates_verified']} candidate image(s) were checked; "
+            "none contained a face matching the input scan."
+        )
+        raise NoMatchFound(
+            "No matching public social media post found. " + detail,
+            discovery=discovery,
+        )
+
+    # ── 4. Canonical record + fingerprint ────────────────────────────────
     discovered_at = datetime.now(timezone.utc).isoformat()
 
     canonical_record = {
         "pipeline": "HH_GOA_2026_TASK_3",
         "record_type": "WEB_SOCIAL_FACE_VERIFICATION",
         "discovered_post": {
-            "url": discovered_post["post_url"],
-            "platform": discovered_post["platform"],
-            "author": discovered_post["author"],
-            "title": discovered_post.get("title", ""),
-            "description": discovered_post.get("description", ""),
-            "image_url": discovered_post["image_url"]
+            "url": match.page_url,
+            "platform": match.platform,
+            "author": match.author or match.title or match.page_url,
+            "title": match.title,
+            "description": match.description,
+            "image_url": match.image_url,
         },
         "verification_metrics": {
-            "similarity_percentage": round(sim_pct, 2),
-            "euclidean_distance": round(euc_dist, 4),
-            "cosine_similarity": round(cos_sim, 4),
+            "similarity_percentage": match.similarity_pct,
+            "euclidean_distance": match.best_l2,
+            "cosine_similarity": match.best_cosine,
             "threshold_used": threshold,
-            "is_match": bool(is_match)
+            "is_match": True,
         },
-        "discovered_at": discovered_at
+        "models": {
+            "detector": scan_diag["detector_model"],
+            "recognizer": scan_diag["recognizer_model"],
+        },
+        "discovered_at": discovered_at,
     }
 
     record_hash = generate_canonical_hash(canonical_record)
     bytes32_record_hash = "0x" + record_hash
 
-    # 5. Commit to Blockchain
+    # ── 5. Commit, then read back and re-verify ──────────────────────────
     blockchain_tx = submit_record_hash_to_blockchain(bytes32_record_hash)
-
-    # 6. Re-Verify On-Chain from Smart Contract
     time.sleep(0.5)
     onchain_verification = query_verification_record(bytes32_record_hash)
+
+    # Recompute the fingerprint from the record we are about to return and
+    # compare it with what the chain holds. This is the tamper-evidence step:
+    # it proves the displayed record is the one that was committed.
+    recomputed_hash = "0x" + generate_canonical_hash(canonical_record)
+    tamper_check = {
+        "recomputed_hash": recomputed_hash,
+        "stored_hash": bytes32_record_hash,
+        "hashes_identical": recomputed_hash == bytes32_record_hash,
+        "found_on_chain": bool(onchain_verification.get("exists_on_chain")),
+        "simulated": bool(blockchain_tx.get("simulated")),
+    }
+    tamper_check["verdict"] = (
+        "VERIFIED" if tamper_check["hashes_identical"] and tamper_check["found_on_chain"]
+        else "UNVERIFIED" if not tamper_check["found_on_chain"]
+        else "TAMPERED"
+    )
 
     return {
         "success": True,
         "pipeline_stage": "COMPLETE",
         "input_face": {
             "crop_base64": scan_crop_b64,
-            "image_width": img_w,
-            "image_height": img_h
+            "image_width": scan["image_width"],
+            "image_height": scan["image_height"],
         },
         "discovered_post": {
-            "url": discovered_post["post_url"],
-            "platform": discovered_post["platform"],
-            "author": discovered_post["author"],
-            "title": discovered_post.get("title", ""),
-            "description": discovered_post.get("description", ""),
-            "image_url": discovered_post["image_url"],
-            "post_face_crop_base64": post_crop_b64
+            "url": match.page_url,
+            "platform": match.platform,
+            "author": match.author or match.title or match.page_url,
+            "title": match.title,
+            "description": match.description,
+            "image_url": match.image_url,
+            "post_face_crop_base64": match.face_crop_b64,
         },
         "metrics": {
-            "similarity_percentage": round(sim_pct, 2),
-            "euclidean_distance": round(euc_dist, 4),
-            "cosine_similarity": round(cos_sim, 4),
-            "is_match": bool(is_match)
+            "similarity_percentage": match.similarity_pct,
+            "euclidean_distance": match.best_l2,
+            "cosine_similarity": match.best_cosine,
+            "is_match": True,
         },
         "record_hash": bytes32_record_hash,
         "canonical_record": canonical_record,
         "blockchain_upload": blockchain_tx,
-        "onchain_reverification": onchain_verification
+        "onchain_reverification": onchain_verification,
+        "tamper_check": tamper_check,
+        "diagnostics": {
+            "input_scan": scan_diag,
+            "search": {
+                "mechanisms": discovery["search_mechanisms"],
+                "capabilities": discovery["capabilities"],
+                "candidates_considered": discovery["candidates_considered"],
+                "candidates_verified": discovery["candidates_verified"],
+                "threshold_l2": discovery["threshold_l2"],
+                "candidate_report": discovery["candidate_report"],
+            },
+        },
     }
+
+
 
 async def fetch_post_metadata_and_image(url: str) -> Optional[Dict[str, Any]]:
     """Helper wrapper for direct URL post fetching."""
