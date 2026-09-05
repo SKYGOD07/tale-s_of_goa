@@ -75,49 +75,31 @@ export const FaceOverlay: React.FC<FaceOverlayProps> = ({
         overflow: 'hidden',
       }}
     >
-      {hasFaces && !usePercentage &&
-      {faces.map((box, index) => {
-        let topStyle: string;
-        let leftStyle: string;
-        let widthStyle: string;
-        let heightStyle: string;
+      {hasFaces && !usePercentage && faces.map((box, index) => {
+        // The media is laid out by object-fit, which scales it uniformly and
+        // then letterboxes ('contain') or overflows ('cover') it inside the
+        // box. Scaling the rect by cw/imageWidth and ch/imageHeight separately
+        // stretches it and ignores that offset, so on any photo whose aspect
+        // ratio differs from the box the marker lands off the face.
+        const sx = cw / imageWidth;
+        const sy = ch / imageHeight;
 
-        if (usePercentage) {
-          topStyle = `${(box.top / imageHeight) * 100}%`;
-          heightStyle = `${((box.bottom - box.top) / imageHeight) * 100}%`;
-          widthStyle = `${((box.right - box.left) / imageWidth) * 100}%`;
-          leftStyle = isMirrored
-            ? `${((imageWidth - box.right) / imageWidth) * 100}%`
-            : `${(box.left / imageWidth) * 100}%`;
-        } else {
-          // The media is laid out by object-fit, which scales it uniformly and
-          // then letterboxes ('contain') or overflows ('cover') it inside the
-          // box. Scaling the detection rect by containerW/imageW and
-          // containerH/imageH separately — as this did — stretches the rect and
-          // ignores that offset, so on any photo whose aspect ratio differs
-          // from the box the marker lands somewhere other than the face.
-          const cw = containerWidth as number;
-          const ch = containerHeight as number;
-          const sx = cw / imageWidth;
-          const sy = ch / imageHeight;
+        const scale =
+          objectFit === 'fill' ? null
+          : objectFit === 'cover' ? Math.max(sx, sy)
+          : Math.min(sx, sy);
 
-          const scale =
-            objectFit === 'fill' ? null
-            : objectFit === 'cover' ? Math.max(sx, sy)
-            : Math.min(sx, sy);
+        const scaleX = scale ?? sx;
+        const scaleY = scale ?? sy;
+        const offsetX = (cw - imageWidth * scaleX) / 2;
+        const offsetY = (ch - imageHeight * scaleY) / 2;
 
-          const scaleX = scale ?? sx;
-          const scaleY = scale ?? sy;
-          const offsetX = (cw - imageWidth * scaleX) / 2;
-          const offsetY = (ch - imageHeight * scaleY) / 2;
-
-          topStyle = `${box.top * scaleY + offsetY}px`;
-          heightStyle = `${(box.bottom - box.top) * scaleY}px`;
-          widthStyle = `${(box.right - box.left) * scaleX}px`;
-          leftStyle = isMirrored
-            ? `${(imageWidth - box.right) * scaleX + offsetX}px`
-            : `${box.left * scaleX + offsetX}px`;
-        }
+        const topStyle = `${box.top * scaleY + offsetY}px`;
+        const heightStyle = `${(box.bottom - box.top) * scaleY}px`;
+        const widthStyle = `${(box.right - box.left) * scaleX}px`;
+        const leftStyle = isMirrored
+          ? `${(imageWidth - box.right) * scaleX + offsetX}px`
+          : `${box.left * scaleX + offsetX}px`;
 
         return (
           <div
