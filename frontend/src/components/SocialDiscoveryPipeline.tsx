@@ -6,7 +6,7 @@ import { runSocialSearchPipeline, SocialSearchPipelineResponse } from '../servic
 export function SocialDiscoveryPipeline() {
   const [inputImage, setInputImage] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [threshold, setThreshold] = useState<number>(1.0);
+  const [threshold, setThreshold] = useState<number>(1.128);
   const [loading, setLoading] = useState<boolean>(false);
   const [stepState, setStepState] = useState<number>(0);
   const [result, setResult] = useState<SocialSearchPipelineResponse | null>(null);
@@ -47,6 +47,11 @@ export function SocialDiscoveryPipeline() {
       if (!data.success) {
         setErrorMsg(data.error || 'Failed to complete pipeline');
         setStepState(0);
+      } else if (data.match_found === false) {
+        // The search ran and genuinely found nobody. Show that plainly - the
+        // pipeline must never substitute a stand-in identity here.
+        setResult(data);
+        setStepState(4);
       } else {
         setResult(data);
         setStepState(4); // Completed
@@ -333,7 +338,51 @@ export function SocialDiscoveryPipeline() {
       )}
 
       {/* RESULT CARDS */}
-      {result && (
+      {result && result.match_found === false && (
+        <div
+          style={{
+            background: 'rgba(20, 23, 16, 0.85)',
+            border: '1px solid rgba(232, 196, 106, 0.32)',
+            borderRadius: '16px',
+            padding: '1.75rem',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1rem',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <span className="tag tag--warn">No match</span>
+            <h3 style={{ margin: 0, fontSize: '1.2rem', color: '#f4f6f0' }}>
+              No matching public social media post found
+            </h3>
+          </div>
+          <p style={{ margin: 0, fontSize: '0.85rem', color: 'rgba(255,255,255,0.62)', lineHeight: 1.6 }}>
+            {result.message}
+          </p>
+
+          {result.diagnostics?.search && (
+            <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.44)' }}>
+              <div style={{ marginBottom: '0.5rem' }}>
+                Search: {result.diagnostics.search.mechanisms.join(', ') || 'none available'} &middot;{' '}
+                {result.diagnostics.search.candidates_verified} candidate image(s) checked &middot;
+                threshold L2 &le; {result.diagnostics.search.threshold_l2}
+              </div>
+              {result.diagnostics.search.candidate_report.slice(0, 6).map((c, i) => (
+                <div key={i} style={{ display: 'flex', gap: '0.75rem', padding: '0.3rem 0', borderTop: '1px solid var(--rule)' }}>
+                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {c.image_url}
+                  </span>
+                  <span className="mono" style={{ color: '#d3e3bb' }}>
+                    {c.euclidean_distance != null ? `L2 ${c.euclidean_distance.toFixed(4)}` : (c.error || '-')}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {result && result.match_found !== false && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           {/* SECTION: DISCOVERED SOCIAL MEDIA POST */}
           <div
