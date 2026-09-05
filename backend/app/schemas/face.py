@@ -78,7 +78,10 @@ class VerificationResponse(BaseModel):
 class CompareRequest(BaseModel):
     image_a: str = Field(..., description="Base64 encoded Camera / Live image frame")
     image_b: str = Field(..., description="Base64 encoded Reference / Social media image frame")
-    threshold: Optional[float] = Field(default=0.60, description="Euclidean distance threshold for match decision")
+    # SFace's published L2 operating point. 0.60 was inherited from the old
+    # unaligned embedding and is far too strict for aligned SFace features:
+    # genuine same-person pairs land around 0.85, so 0.60 rejected real matches.
+    threshold: Optional[float] = Field(default=1.128, description="SFace L2 distance threshold for match decision")
     auto_record_on_chain: Optional[bool] = Field(default=False, description="Automatically submit verified record to EVM blockchain")
 
 class CompareResponse(BaseModel):

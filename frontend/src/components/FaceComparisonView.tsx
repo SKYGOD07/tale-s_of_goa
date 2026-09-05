@@ -13,6 +13,7 @@ export function FaceComparisonView({ onNotify }: Props) {
   // Image A (Camera or Live Capture)
   const [imageA, setImageA] = useState<string | null>(null);
   const [faceABoxes, setFaceABoxes] = useState<FaceBox[]>([]);
+  const [dimsA, setDimsA] = useState({ width: 640, height: 480 });
   const [useCameraA, setUseCameraA] = useState<boolean>(true);
   const [isCameraActive, setIsCameraActive] = useState<boolean>(false);
   const [isMirroredA, setIsMirroredA] = useState<boolean>(true);
@@ -26,6 +27,7 @@ export function FaceComparisonView({ onNotify }: Props) {
   // Image B (Reference / Social Post Image)
   const [imageB, setImageB] = useState<string | null>(null);
   const [faceBBoxes, setFaceBBoxes] = useState<FaceBox[]>([]);
+  const [dimsB, setDimsB] = useState({ width: 640, height: 480 });
   const [statusMessageB, setStatusMessageB] = useState<string>('NO IMAGE');
   const [pixelStatsB, setPixelStatsB] = useState<PixelStats | undefined>(undefined);
   const [rgbCropB, setRgbCropB] = useState<string | undefined>(undefined);
@@ -33,7 +35,7 @@ export function FaceComparisonView({ onNotify }: Props) {
   const [eqCropB, setEqCropB] = useState<string | undefined>(undefined);
 
   // Pipeline execution & results
-  const [threshold, setThreshold] = useState<number>(1.0);
+  const [threshold, setThreshold] = useState<number>(1.128);
   const [autoRecord, setAutoRecord] = useState<boolean>(true);
   const [isComparing, setIsComparing] = useState<boolean>(false);
   const [result, setResult] = useState<CompareResponse | null>(null);
@@ -116,6 +118,7 @@ export function FaceComparisonView({ onNotify }: Props) {
         isSamplingRef.current = true;
         const detectRes = await detectFace(dataUrl);
         setFaceABoxes(detectRes.faces || []);
+        setDimsA({ width: detectRes.image_width || 640, height: detectRes.image_height || 480 });
         setStatusMessageA(detectRes.status_message || (detectRes.face_detected ? '1 FACE DETECTED' : 'SEARCHING...'));
         if (detectRes.pixel_stats) setPixelStatsA(detectRes.pixel_stats);
         if (detectRes.rgb_crop_base64) setRgbCropA(detectRes.rgb_crop_base64);
@@ -148,6 +151,7 @@ export function FaceComparisonView({ onNotify }: Props) {
     detectFace(dataUrl)
       .then((res) => {
         setFaceABoxes(res.faces || []);
+        setDimsA({ width: res.image_width || 640, height: res.image_height || 480 });
         setStatusMessageA('FRAME CAPTURED');
         if (res.pixel_stats) setPixelStatsA(res.pixel_stats);
         if (res.rgb_crop_base64) setRgbCropA(res.rgb_crop_base64);
@@ -175,6 +179,7 @@ export function FaceComparisonView({ onNotify }: Props) {
       try {
         const res = await detectFace(dataUrl);
         setFaceABoxes(res.faces || []);
+        setDimsA({ width: res.image_width || 640, height: res.image_height || 480 });
         setStatusMessageA(res.status_message || 'IMAGE A LOADED');
         if (res.pixel_stats) setPixelStatsA(res.pixel_stats);
         if (res.rgb_crop_base64) setRgbCropA(res.rgb_crop_base64);
@@ -198,6 +203,7 @@ export function FaceComparisonView({ onNotify }: Props) {
       try {
         const res = await detectFace(dataUrl);
         setFaceBBoxes(res.faces || []);
+        setDimsB({ width: res.image_width || 640, height: res.image_height || 480 });
         setStatusMessageB(res.status_message || 'REFERENCE IMAGE LOADED');
         if (res.pixel_stats) setPixelStatsB(res.pixel_stats);
         if (res.rgb_crop_base64) setRgbCropB(res.rgb_crop_base64);
@@ -455,8 +461,9 @@ export function FaceComparisonView({ onNotify }: Props) {
                   />
                   <FaceOverlay
                     faces={faceABoxes}
-                    imageWidth={videoRef.current?.videoWidth || 640}
-                    imageHeight={videoRef.current?.videoHeight || 480}
+                    objectFit="cover"
+                    imageWidth={videoRef.current?.videoWidth || dimsA.width}
+                    imageHeight={videoRef.current?.videoHeight || dimsA.height}
                     isMirrored={isMirroredA}
                     color="#d4af37"
                   />
@@ -475,8 +482,9 @@ export function FaceComparisonView({ onNotify }: Props) {
                   />
                   <FaceOverlay
                     faces={faceABoxes}
-                    imageWidth={640}
-                    imageHeight={480}
+                    objectFit="contain"
+                    imageWidth={dimsA.width}
+                    imageHeight={dimsA.height}
                     isMirrored={useCameraA && isMirroredA}
                     color="#d4af37"
                   />
@@ -611,8 +619,9 @@ export function FaceComparisonView({ onNotify }: Props) {
                   <img src={imageB} alt="Reference B" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
                   <FaceOverlay
                     faces={faceBBoxes}
-                    imageWidth={640}
-                    imageHeight={480}
+                    objectFit="contain"
+                    imageWidth={dimsB.width}
+                    imageHeight={dimsB.height}
                     isMirrored={false}
                     color="#d3e3bb"
                   />

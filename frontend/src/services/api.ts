@@ -202,7 +202,7 @@ export async function encodeFace(base64Image: string): Promise<EncodeResponse> {
 export async function compareFaces(
   imageA: string,
   imageB: string,
-  threshold: number = 1.0,
+  threshold: number = 1.128,
   autoRecordOnChain: boolean = true
 ): Promise<CompareResponse> {
   try {

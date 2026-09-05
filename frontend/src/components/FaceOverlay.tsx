@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { FaceBox } from '../services/api';
 
 export interface FaceOverlayProps {
@@ -26,17 +26,45 @@ export const FaceOverlay: React.FC<FaceOverlayProps> = ({
   color,
   objectFit = 'contain',
 }) => {
-  if (!imageWidth || !imageHeight || faces.length === 0) {
-    return null;
-  }
+  // The overlay spans the same box as the media, so it can measure itself
+  // rather than every caller having to pass its container size. Callers that
+  // already know the size may still pass it; measurement fills the rest.
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const [measured, setMeasured] = useState<{ w: number; h: number } | null>(null);
 
-  // If container dimensions are not provided, use percentage scaling relative to image coordinates
-  const usePercentage = !containerWidth || !containerHeight;
+  useLayoutEffect(() => {
+    const el = rootRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const read = () => {
+      const r = el.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) {
+        setMeasured((prev) =>
+          prev && Math.abs(prev.w - r.width) < 0.5 && Math.abs(prev.h - r.height) < 0.5
+            ? prev
+            : { w: r.width, h: r.height }
+        );
+      }
+    };
+    read();
+    const ro = new ResizeObserver(read);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const cw = containerWidth || measured?.w || 0;
+  const ch = containerHeight || measured?.h || 0;
+
   const isSingleFace = faces.length === 1;
   const boxColor = color || (isSingleFace ? '#7fd6a2' : '#e8c46a');
 
+  // Until the box has been measured there is no way to place the rect
+  // correctly, so draw nothing rather than drawing it in the wrong place.
+  const usePercentage = !cw || !ch;
+  const hasFaces = !!imageWidth && !!imageHeight && faces.length > 0;
+
   return (
     <div
+      ref={rootRef}
       style={{
         position: 'absolute',
         top: 0,
@@ -47,6 +75,7 @@ export const FaceOverlay: React.FC<FaceOverlayProps> = ({
         overflow: 'hidden',
       }}
     >
+      {hasFaces && !usePercentage &&
       {faces.map((box, index) => {
         let topStyle: string;
         let leftStyle: string;
