@@ -3,7 +3,7 @@ import io
 import os
 import cv2
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageOps
 from typing import List, Tuple, Dict, Any, Optional
 
 # Load OpenCV Cascade Face Classifiers for robust multi-angle face detection
@@ -37,7 +37,14 @@ def decode_base64_image(base64_string: str) -> np.ndarray:
     base64_string = base64_string.strip()
 
     image_bytes = base64.b64decode(base64_string)
-    image = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+    image = Image.open(io.BytesIO(image_bytes))
+    # Photos off a phone or camera are usually stored unrotated with an EXIF
+    # Orientation tag describing the turn. Without applying it the face arrives
+    # sideways, and the Haar cascades only match upright frontal faces - so an
+    # ordinary portrait silently fails to detect. Must run before convert(),
+    # which drops the EXIF block.
+    image = ImageOps.exif_transpose(image)
+    image = image.convert('RGB')
     open_cv_image = np.array(image)
     # Convert RGB to BGR for OpenCV processing
     return cv2.cvtColor(open_cv_image, cv2.COLOR_RGB2BGR)
