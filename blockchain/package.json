@@ -5,18 +5,24 @@
   "main": "hardhat.config.js",
   "scripts": {
     "compile": "npx hardhat compile",
-    "test": "npx hardhat test"
+    "test": "npx hardhat test",
+    "node": "npx hardhat node",
+    "deploy:local": "npx hardhat run scripts/deploy.js --network localhost",
+    "deploy:sepolia": "npx hardhat run scripts/deploy.js --network sepolia",
+    "balance:sepolia": "npx hardhat run scripts/balance.js --network sepolia"
   },
   "keywords": [
     "blockchain",
     "ethereum",
     "hardhat",
-    "smart-contracts"
+    "smart-contracts",
+    "sepolia"
   ],
   "author": "",
   "license": "MIT",
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "dotenv": "^16.4.5",
     "hardhat": "^2.29.1"
   }
 }

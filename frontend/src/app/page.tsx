@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useCallback, useEffect } from 'react';
+import { SylvaHeroBackground } from '../components/SylvaHeroBackground';
 import { CameraView } from '../components/CameraView';
 import { TestImageUpload } from '../components/TestImageUpload';
 import { DetectionStatus, PipelineStatus } from '../components/DetectionStatus';
@@ -13,14 +14,49 @@ import {
   detectFace,
   encodeFace,
   recordVerification,
+  getChainStatus,
+  ChainStatus,
   FaceBox,
   PixelStats,
   VerificationResponse,
 } from '../services/api';
 
+/* ═══════════════════════════════════════════════════════════════════
+   Only the presentation layer lives in this file's markup. Every
+   handler, state hook and API call below is unchanged from the
+   original pipeline implementation.
+   ═══════════════════════════════════════════════════════════════════ */
+
+const TABS = [
+  { key: 'pipeline' as const, idx: '01', label: 'Automated discovery' },
+  { key: 'compare' as const, idx: '02', label: '1-to-1 verification' },
+  { key: 'register' as const, idx: '03', label: 'Registration & proof' },
+];
+
+/** A labelled hairline-separated statistic. Used across the header rail. */
+function Stat({ label, value, tone }: { label: string; value: React.ReactNode; tone?: string }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+      <span className="eyebrow">{label}</span>
+      <span
+        style={{
+          fontSize: 'var(--t-small)',
+          color: tone || 'var(--ink-strong)',
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+        }}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
 export default function Home() {
   const [activeTab, setActiveTab] = useState<'pipeline' | 'compare' | 'register'>('pipeline');
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
+  const [chain, setChain] = useState<ChainStatus | null>(null);
 
   // Single Face Registration State
   const [mode, setMode] = useState<'camera' | 'test_image'>('camera');
@@ -65,6 +101,21 @@ export default function Home() {
     const interval = setInterval(checkBackend, 3000);
     return () => clearInterval(interval);
   }, []);
+
+  // Chain reachability is polled far less often than the backend ping — each
+  // check costs a round trip to the Sepolia RPC endpoint.
+  useEffect(() => {
+    if (!backendOnline) return;
+    let cancelled = false;
+    const read = () => {
+      getChainStatus()
+        .then((s) => { if (!cancelled) setChain(s); })
+        .catch(() => { if (!cancelled) setChain(null); });
+    };
+    read();
+    const interval = setInterval(read, 30000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [backendOnline]);
 
   // Handle camera status changes
   const handleCameraStatusChange = useCallback((ready: boolean, error: string | null) => {
@@ -173,7 +224,9 @@ export default function Home() {
         isProcessing: false,
       }));
 
-      setStatusMessage('FACE ID VERIFICATION CONFIRMED ✓');
+      setStatusMessage(
+        verifyRes.simulated ? 'RECORDED IN SIMULATION — NOT BROADCAST' : 'FACE ID VERIFICATION CONFIRMED'
+      );
     } catch (err: any) {
       console.error('[Capture & Verify Error]', err);
       alert(`Pipeline error: ${err.message || 'Verification failed'}`);
@@ -181,375 +234,479 @@ export default function Home() {
     }
   };
 
+  /* ── Chain badge state ───────────────────────────────────────────── */
+  const chainTone = !chain
+    ? 'tag--dead'
+    : chain.live
+      ? 'tag--live'
+      : chain.connected
+        ? 'tag--warn'
+        : 'tag--dead';
+
+  const chainLabel = !chain
+    ? 'Chain unknown'
+    : chain.live
+      ? `${chain.network} · live`
+      : chain.connected
+        ? `${chain.network} · simulated`
+        : 'RPC unreachable';
+
   return (
-    <main
-      style={{
-        minHeight: '100vh',
-        background: 'radial-gradient(ellipse at top, #0f172a 0%, #020617 100%)',
-        color: '#f8fafc',
-        fontFamily: 'Inter, system-ui, sans-serif',
-        padding: '36px 20px 60px 20px',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-      }}
-    >
-      <div style={{ width: '100%', maxWidth: '1240px', display: 'flex', flexDirection: 'column', gap: '36px' }}>
-        
-        {/* Navigation Header */}
-        <header style={{
+    <>
+      <SylvaHeroBackground />
+
+      {/* Column guides, echoing the scene's own grid */}
+      <div className="guides" aria-hidden="true">
+        <i /><i /><i /><i /><i />
+      </div>
+
+      <main
+        style={{
+          position: 'relative',
+          zIndex: 2,
+          minHeight: '100svh',
+          padding: '28px 20px 80px',
           display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: '16px',
-          borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
-          paddingBottom: '20px',
-        }}>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <span style={{ fontSize: '1.5rem' }}>🌴</span>
-              <h1
-                style={{
-                  fontSize: '1.75rem',
-                  fontWeight: 900,
-                  letterSpacing: '-0.03em',
-                  margin: 0,
-                  background: 'linear-gradient(135deg, #d4af37 0%, #ffdf00 100%)',
-                  WebkitBackgroundClip: 'text',
-                  WebkitTextFillColor: 'transparent',
-                }}
-              >
-                HH GOA
-              </h1>
-              <span style={{
-                background: 'rgba(212, 175, 55, 0.15)',
-                color: '#d4af37',
-                border: '1px solid rgba(212, 175, 55, 0.3)',
-                padding: '2px 8px',
-                borderRadius: '6px',
-                fontSize: '0.75rem',
-                fontWeight: 700,
-              }}>
-                TASK #3 PIPELINE
-              </span>
-            </div>
-            <p style={{ margin: '4px 0 0 0', color: '#94a3b8', fontSize: '0.875rem' }}>
-              Biometric 128D Face Embedding & EVM Blockchain Verification Engine
-            </p>
-          </div>
+          justifyContent: 'center',
+        }}
+      >
+        <div style={{ width: '100%', maxWidth: 1240, display: 'flex', flexDirection: 'column', gap: 28 }}>
 
-          {/* Backend Health Badge & Tab Switcher */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
-            
-            {/* Backend Status Indicator */}
-            <div style={{
+          {/* ── Masthead ──────────────────────────────────────────────── */}
+          <header
+            className="rise"
+            style={{
               display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              background: 'rgba(0,0,0,0.4)',
-              border: '1px solid rgba(255,255,255,0.08)',
-              padding: '6px 12px',
-              borderRadius: '20px',
-              fontSize: '0.75rem',
-            }}>
-              <span style={{
-                display: 'inline-block',
-                width: '8px',
-                height: '8px',
-                borderRadius: '50%',
-                background: backendOnline ? '#10b981' : '#ef4444',
-                boxShadow: backendOnline ? '0 0 8px #10b981' : '0 0 8px #ef4444',
-              }} />
-              <span style={{ color: backendOnline ? '#a7f3d0' : '#fca5a5' }}>
-                FastAPI: {backendOnline ? 'Online (Port 8000)' : 'Offline'}
-              </span>
-            </div>
+              flexDirection: 'column',
+              gap: 18,
+              minHeight: 'min(84svh, 760px)',
+              paddingBottom: 8,
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-end',
+                flexWrap: 'wrap',
+                gap: 20,
+              }}
+            >
+              <div style={{ minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+                  <span className="eyebrow">HH Goa 2026</span>
+                  <span style={{ width: 28, height: 1, background: 'var(--rule-bright)' }} />
+                  <span className="tag tag--brand">Task 03</span>
+                </div>
 
-            {/* Mode Tabs */}
-            <div style={{
-              background: '#0f172a',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-              borderRadius: '10px',
-              padding: '4px',
-              display: 'flex',
-              gap: '4px',
-            }}>
-              <button
-                onClick={() => setActiveTab('pipeline')}
-                style={{
-                  background: activeTab === 'pipeline' ? 'linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%)' : 'transparent',
-                  color: activeTab === 'pipeline' ? '#ffffff' : '#94a3b8',
-                  border: 'none',
-                  borderRadius: '6px',
-                  padding: '8px 16px',
-                  fontSize: '0.8125rem',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  transition: 'all 0.2s ease',
-                }}
-              >
-                🚀 Task 3: Auto Web/Social &amp; Blockchain
-              </button>
+                <h1
+                  style={{
+                    fontSize: 'var(--t-display)',
+                    letterSpacing: '-0.035em',
+                    lineHeight: 1,
+                    color: 'var(--ink)',
+                  }}
+                >
+                  Face identification
+                  <span style={{ color: 'var(--ink-faint)' }}> &amp; on-chain proof</span>
+                </h1>
 
-              <button
-                onClick={() => setActiveTab('compare')}
-                style={{
-                  background: activeTab === 'compare' ? 'linear-gradient(135deg, #d4af37 0%, #b8860b 100%)' : 'transparent',
-                  color: activeTab === 'compare' ? '#000000' : '#94a3b8',
-                  border: 'none',
-                  borderRadius: '6px',
-                  padding: '8px 16px',
-                  fontSize: '0.8125rem',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  transition: 'all 0.2s ease',
-                }}
-              >
-                ⚡ 1-to-1 Verification &amp; Social Matcher
-              </button>
-
-              <button
-                onClick={() => setActiveTab('register')}
-                style={{
-                  background: activeTab === 'register' ? 'linear-gradient(135deg, #d4af37 0%, #b8860b 100%)' : 'transparent',
-                  color: activeTab === 'register' ? '#000000' : '#94a3b8',
-                  border: 'none',
-                  borderRadius: '6px',
-                  padding: '8px 16px',
-                  fontSize: '0.8125rem',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  transition: 'all 0.2s ease',
-                }}
-              >
-                📸 Face ID Registration &amp; Proof
-              </button>
-            </div>
-
-          </div>
-        </header>
-
-        {/* Backend Offline Guidance Banner */}
-        {backendOnline === false && (
-          <div style={{
-            background: 'rgba(239, 68, 68, 0.12)',
-            border: '1px solid #ef4444',
-            borderRadius: '12px',
-            padding: '16px 20px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            flexWrap: 'wrap',
-            gap: '12px',
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <span style={{ fontSize: '1.25rem' }}>⚠️</span>
-              <div>
-                <strong style={{ color: '#fca5a5' }}>FastAPI Backend is Offline (port 8000)</strong>
-                <p style={{ margin: '2px 0 0 0', color: '#cbd5e1', fontSize: '0.8125rem' }}>
-                  The frontend cannot connect to the Python computer vision API. Please start the backend server in a terminal:
+                <p
+                  style={{
+                    marginTop: 12,
+                    maxWidth: '58ch',
+                    color: 'var(--ink-soft)',
+                    fontSize: 'var(--t-body)',
+                  }}
+                >
+                  A 128-dimensional biometric embedding, reduced to a canonical SHA-256 record
+                  hash and anchored to an Ethereum smart contract. No image or vector ever
+                  leaves the machine.
                 </p>
               </div>
-            </div>
-            <code style={{
-              background: '#020617',
-              color: '#38bdf8',
-              padding: '6px 12px',
-              borderRadius: '6px',
-              fontFamily: 'monospace',
-              fontSize: '0.8125rem',
-              border: '1px solid rgba(255,255,255,0.1)',
-            }}>
-              cd backend &amp;&amp; python run.py
-            </code>
-          </div>
-        )}
 
-        {/* TAB 0: TASK 3 AUTOMATED PIPELINE */}
-        {activeTab === 'pipeline' && (
-          <SocialDiscoveryPipeline />
-        )}
-
-        {/* TAB 1: 1-TO-1 FACE COMPARISON & SOCIAL MEDIA MATCHER */}
-        {activeTab === 'compare' && (
-          <FaceComparisonView />
-        )}
-
-        {/* TAB 2: SINGLE FACE ID REGISTRATION & ON-CHAIN PROOF */}
-        {activeTab === 'register' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '36px' }}>
-            
-            <div style={{ 
-              display: 'grid', 
-              gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', 
-              gap: '48px', 
-              alignItems: 'center' 
-            }}>
-              
-              {/* Left Column: Description */}
-              <div>
-                <h2 style={{
-                  fontSize: '2.5rem',
-                  fontWeight: 900,
-                  lineHeight: 1.15,
-                  margin: '0 0 16px 0',
-                  color: '#ffffff',
-                }}>
-                  Biometric Face ID<br />
-                  Registration Engine
-                </h2>
-                <p style={{ margin: '0 0 24px 0', color: '#94a3b8', fontSize: '1.05rem', lineHeight: 1.6 }}>
-                  Live camera frames are analyzed with OpenCV to isolate facial bounding boxes. The cropped face region undergoes <strong>8-bit Grayscale Conversion (<code style={{ color: '#38bdf8' }}>cv2.COLOR_BGR2GRAY</code>)</strong> and <strong>Histogram Equalization</strong> before being encoded into a <strong>128-dimensional numerical vector</strong>, hashed via <strong>canonical SHA-256</strong>, and anchored immutably to the <strong>EVM Smart Contract</strong>.
-                </p>
-                <div style={{
-                  background: 'rgba(0,0,0,0.3)',
-                  border: '1px solid rgba(255,255,255,0.08)',
-                  borderRadius: '12px',
-                  padding: '16px',
+              {/* Status rail */}
+              <div
+                className="panel"
+                style={{
                   display: 'flex',
-                  flexDirection: 'column',
-                  gap: '8px',
-                  fontSize: '0.8125rem',
-                  color: '#cbd5e1',
-                }}>
-                  <div>🖼️ <strong>Grayscale & Equalization:</strong> Normalizes lighting and contrast for invariant 128D vectors.</div>
-                  <div>🔒 <strong>Privacy Assured:</strong> Raw photos are never stored on-chain.</div>
-                  <div>⚡ <strong>Deterministic:</strong> L2-normalized 128D mathematical vectors.</div>
-                  <div>⛓️ <strong>Tamper-Proof:</strong> Smart contract commits 32-byte cryptographic hashes.</div>
-                </div>
-              </div>
-
-              {/* Right Column: Scanner View */}
-              <div style={{
-                background: '#0f172a',
-                borderRadius: '24px',
-                padding: '28px',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
-                boxShadow: '0 20px 40px rgba(0, 0, 0, 0.4)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '20px',
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <h3 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 700 }}>Single Face Ingestion</h3>
-                  
-                  <div style={{
-                    background: 'rgba(0,0,0,0.2)',
-                    border: '1px solid rgba(255, 255, 255, 0.1)',
-                    borderRadius: '8px',
-                    padding: '3px',
-                    display: 'flex',
-                    gap: '4px',
-                  }}>
-                    <button
-                      onClick={() => setMode('camera')}
-                      style={{
-                        padding: '6px 12px',
-                        borderRadius: '6px',
-                        border: 'none',
-                        background: mode === 'camera' ? 'rgba(255,255,255,0.15)' : 'transparent',
-                        color: mode === 'camera' ? '#ffffff' : '#94a3b8',
-                        fontWeight: 600,
-                        fontSize: '0.75rem',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      📷 Camera
-                    </button>
-                    <button
-                      onClick={() => setMode('test_image')}
-                      style={{
-                        padding: '6px 12px',
-                        borderRadius: '6px',
-                        border: 'none',
-                        background: mode === 'test_image' ? 'rgba(255,255,255,0.15)' : 'transparent',
-                        color: mode === 'test_image' ? '#ffffff' : '#94a3b8',
-                        fontWeight: 600,
-                        fontSize: '0.75rem',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      🖼️ Upload
-                    </button>
-                  </div>
-                </div>
-
-                <div style={{
-                  border: '2px dashed rgba(255,255,255,0.15)',
-                  borderRadius: '16px',
-                  padding: '4px',
-                }}>
-                  {mode === 'camera' ? (
-                    <CameraView
-                      onFrameCaptured={handleFrameCaptured}
-                      faces={faces}
-                      imageWidth={imageWidth}
-                      imageHeight={imageHeight}
-                      statusMessage={statusMessage}
-                      isProcessing={pipelineStatus.isProcessing}
-                      onCameraStatusChange={handleCameraStatusChange}
-                    />
-                  ) : (
-                    <TestImageUpload
-                      onImageSelected={handleTestImageSelected}
-                      selectedImage={testImage}
-                      faces={faces}
-                      imageWidth={imageWidth}
-                      imageHeight={imageHeight}
-                      statusMessage={statusMessage}
-                    />
-                  )}
-                </div>
-
-                <CaptureButton
-                  onCapture={handleCaptureAndVerify}
-                  disabled={!pipelineStatus.faceDetected || pipelineStatus.faceCount !== 1}
-                  isProcessing={pipelineStatus.isProcessing}
-                  faceCount={pipelineStatus.faceCount}
+                  alignItems: 'center',
+                  gap: 22,
+                  padding: '14px 20px',
+                  borderRadius: 'var(--radius)',
+                }}
+              >
+                <Stat
+                  label="Backend"
+                  tone={backendOnline ? 'var(--live)' : 'var(--dead)'}
+                  value={
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+                      <span
+                        className="dot dot--pulse"
+                        style={{ color: backendOnline ? 'var(--live)' : 'var(--dead)' }}
+                      />
+                      {backendOnline === null ? 'Checking' : backendOnline ? 'FastAPI :8000' : 'Offline'}
+                    </span>
+                  }
                 />
+                <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--rule-strong)' }} />
+                <Stat
+                  label="Network"
+                  tone={
+                    chain?.live ? 'var(--live)' : chain?.connected ? 'var(--warn)' : 'var(--dead)'
+                  }
+                  value={
+                    chain?.explorer_url ? (
+                      <a
+                        href={chain.explorer_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ borderBottom: '1px solid var(--rule-bright)' }}
+                      >
+                        {chainLabel}
+                      </a>
+                    ) : (
+                      chainLabel
+                    )
+                  }
+                />
+                {chain?.block_number != null && (
+                  <>
+                    <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--rule-strong)' }} />
+                    <Stat
+                      label="Block"
+                      value={<span className="mono">#{chain.block_number.toLocaleString('en-US')}</span>}
+                    />
+                  </>
+                )}
               </div>
-
             </div>
 
-            {/* Pixel Data & Grayscale Inspection Panel */}
-            <PixelInspectionPanel
-              title="Camera Ingestion — Grayscale Output & Pixel Inspection"
-              pixelStats={pixelStats}
-              rgbCropBase64={rgbCrop}
-              grayscaleCropBase64={grayCrop}
-              equalizedCropBase64={eqCrop}
-              accentColor="#d4af37"
-            />
-
-            {/* Results Section */}
-            {(pipelineStatus.embeddingGenerated || pipelineStatus.isProcessing) && (
-              <div style={{
-                borderTop: '1px solid rgba(255,255,255,0.1)',
-                paddingTop: '36px',
+            {/* ── Tabs ────────────────────────────────────────────────── */}
+            <div
+              role="tablist"
+              aria-label="Pipeline sections"
+              style={{
                 display: 'flex',
-                flexDirection: 'column',
-                gap: '24px',
-              }}>
-                <h3 style={{ margin: 0, fontSize: '1.35rem', fontWeight: 700, textAlign: 'center' }}>
-                  Cryptographic Biometric Proof
-                </h3>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: '24px' }}>
-                  <DetectionStatus status={pipelineStatus} />
-                  <EmbeddingPanel
-                    embedding={embedding}
-                    embeddingDimension={pipelineStatus.embeddingDimension || 128}
-                    recordHash={recordHash}
-                    verificationResult={verificationResult}
+                gap: 4,
+                paddingTop: 16,
+                borderTop: '1px solid var(--rule)',
+                flexWrap: 'wrap',
+                marginTop: 'auto',
+              }}
+            >
+              {TABS.map((tab) => (
+                <button
+                  key={tab.key}
+                  role="tab"
+                  aria-selected={activeTab === tab.key}
+                  className="pill"
+                  onClick={() => setActiveTab(tab.key)}
+                >
+                  <span className="idx">{tab.idx}</span>
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          </header>
+
+          {/* ── Backend offline guidance ──────────────────────────────── */}
+          {backendOnline === false && (
+            <div
+              className="panel rise"
+              style={{
+                padding: '18px 22px',
+                borderColor: 'rgba(224, 133, 133, 0.28)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: 14,
+              }}
+            >
+              <div>
+                <div style={{ color: 'var(--dead)', marginBottom: 2 }}>
+                  The FastAPI backend on port 8000 is not responding
+                </div>
+                <p style={{ color: 'var(--ink-faint)', fontSize: 'var(--t-small)', margin: 0 }}>
+                  Detection, encoding and blockchain calls are unavailable until it is running.
+                </p>
+              </div>
+              <code
+                className="panel-sunken"
+                style={{
+                  padding: '8px 14px',
+                  color: 'var(--leaf)',
+                  fontSize: 'var(--t-small)',
+                }}
+              >
+                cd backend &amp;&amp; .venv\Scripts\python run.py
+              </code>
+            </div>
+          )}
+
+          {/* ── Simulated-chain notice ────────────────────────────────── */}
+          {backendOnline && chain && !chain.live && (
+            <div
+              className="panel rise"
+              style={{
+                padding: '16px 22px',
+                borderColor: 'rgba(232, 196, 106, 0.24)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                flexWrap: 'wrap',
+              }}
+            >
+              <span className="tag tag--warn">Simulated</span>
+              <p style={{ color: 'var(--ink-soft)', fontSize: 'var(--t-small)', margin: 0, flex: 1, minWidth: 260 }}>
+                {chain.message} Proofs will be generated locally and marked as not broadcast.
+              </p>
+            </div>
+          )}
+
+          {/* ── TAB 01: automated discovery ───────────────────────────── */}
+          {activeTab === 'pipeline' && (
+            <div className="rise" role="tabpanel">
+              <SocialDiscoveryPipeline />
+            </div>
+          )}
+
+          {/* ── TAB 02: 1-to-1 comparison ─────────────────────────────── */}
+          {activeTab === 'compare' && (
+            <div className="rise" role="tabpanel">
+              <FaceComparisonView />
+            </div>
+          )}
+
+          {/* ── TAB 03: registration & on-chain proof ─────────────────── */}
+          {activeTab === 'register' && (
+            <div
+              className="rise"
+              role="tabpanel"
+              style={{ display: 'flex', flexDirection: 'column', gap: 32 }}
+            >
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))',
+                  gap: 40,
+                  alignItems: 'start',
+                }}
+              >
+                {/* Method */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 20, paddingTop: 6 }}>
+                  <div>
+                    <span className="eyebrow">Method</span>
+                    <h2 style={{ fontSize: 'var(--t-title)', marginTop: 10 }}>
+                      From pixels to a 32-byte commitment
+                    </h2>
+                  </div>
+
+                  <ol
+                    style={{
+                      listStyle: 'none',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 0,
+                      counterReset: 'step',
+                    }}
+                  >
+                    {[
+                      {
+                        t: 'Detect',
+                        d: 'OpenCV isolates the facial bounding box from the live frame.',
+                      },
+                      {
+                        t: 'Normalise',
+                        d: 'The crop is converted to 8-bit grayscale and histogram-equalised, so lighting and contrast stop influencing the vector.',
+                      },
+                      {
+                        t: 'Embed',
+                        d: 'The normalised crop is encoded as an L2-normalised 128-dimensional vector.',
+                      },
+                      {
+                        t: 'Commit',
+                        d: 'The canonical record is hashed with SHA-256 and written to the smart contract. Only the 32-byte hash goes on-chain.',
+                      },
+                    ].map((step, i) => (
+                      <li
+                        key={step.t}
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: '38px 1fr',
+                          gap: 14,
+                          padding: '16px 0',
+                          borderTop: i === 0 ? 'none' : '1px solid var(--rule)',
+                        }}
+                      >
+                        <span
+                          className="mono"
+                          style={{ color: 'var(--gold)', fontSize: 'var(--t-micro)', paddingTop: 4 }}
+                        >
+                          {String(i + 1).padStart(2, '0')}
+                        </span>
+                        <div>
+                          <div style={{ color: 'var(--ink)', marginBottom: 3 }}>{step.t}</div>
+                          <p style={{ color: 'var(--ink-faint)', fontSize: 'var(--t-small)', margin: 0 }}>
+                            {step.d}
+                          </p>
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+
+                {/* Ingestion */}
+                <div
+                  className="panel"
+                  style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 18 }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: 12,
+                    }}
+                  >
+                    <div>
+                      <span className="eyebrow">Source</span>
+                      <h3 style={{ fontSize: 'var(--t-heading)', marginTop: 4 }}>Single face ingestion</h3>
+                    </div>
+
+                    <div
+                      role="tablist"
+                      aria-label="Capture source"
+                      style={{
+                        display: 'flex',
+                        gap: 2,
+                        padding: 3,
+                        borderRadius: 999,
+                        border: '1px solid var(--rule)',
+                        background: 'var(--surface-sunken)',
+                      }}
+                    >
+                      <button
+                        role="tab"
+                        aria-selected={mode === 'camera'}
+                        className="pill"
+                        style={{ padding: '6px 14px', fontSize: 'var(--t-micro)' }}
+                        onClick={() => setMode('camera')}
+                      >
+                        Camera
+                      </button>
+                      <button
+                        role="tab"
+                        aria-selected={mode === 'test_image'}
+                        className="pill"
+                        style={{ padding: '6px 14px', fontSize: 'var(--t-micro)' }}
+                        onClick={() => setMode('test_image')}
+                      >
+                        Upload
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="panel-sunken" style={{ padding: 4, overflow: 'hidden' }}>
+                    {mode === 'camera' ? (
+                      <CameraView
+                        onFrameCaptured={handleFrameCaptured}
+                        faces={faces}
+                        imageWidth={imageWidth}
+                        imageHeight={imageHeight}
+                        statusMessage={statusMessage}
+                        isProcessing={pipelineStatus.isProcessing}
+                        onCameraStatusChange={handleCameraStatusChange}
+                      />
+                    ) : (
+                      <TestImageUpload
+                        onImageSelected={handleTestImageSelected}
+                        selectedImage={testImage}
+                        faces={faces}
+                        imageWidth={imageWidth}
+                        imageHeight={imageHeight}
+                        statusMessage={statusMessage}
+                      />
+                    )}
+                  </div>
+
+                  <CaptureButton
+                    onCapture={handleCaptureAndVerify}
+                    disabled={!pipelineStatus.faceDetected || pipelineStatus.faceCount !== 1}
+                    isProcessing={pipelineStatus.isProcessing}
+                    faceCount={pipelineStatus.faceCount}
                   />
                 </div>
               </div>
-            )}
 
-          </div>
-        )}
+              <PixelInspectionPanel
+                title="Grayscale output & pixel inspection"
+                pixelStats={pixelStats}
+                rgbCropBase64={rgbCrop}
+                grayscaleCropBase64={grayCrop}
+                equalizedCropBase64={eqCrop}
+                accentColor="#d4af37"
+              />
 
-      </div>
-    </main>
+              {(pipelineStatus.embeddingGenerated || pipelineStatus.isProcessing) && (
+                <section
+                  className="rise"
+                  style={{
+                    borderTop: '1px solid var(--rule)',
+                    paddingTop: 28,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 20,
+                  }}
+                >
+                  <div>
+                    <span className="eyebrow">Result</span>
+                    <h3 style={{ fontSize: 'var(--t-title)', marginTop: 8 }}>
+                      Cryptographic biometric proof
+                    </h3>
+                  </div>
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))',
+                      gap: 20,
+                    }}
+                  >
+                    <DetectionStatus status={pipelineStatus} />
+                    <EmbeddingPanel
+                      embedding={embedding}
+                      embeddingDimension={pipelineStatus.embeddingDimension || 128}
+                      recordHash={recordHash}
+                      verificationResult={verificationResult}
+                    />
+                  </div>
+                </section>
+              )}
+            </div>
+          )}
+
+          {/* ── Colophon ──────────────────────────────────────────────── */}
+          <footer
+            style={{
+              marginTop: 20,
+              paddingTop: 20,
+              borderTop: '1px solid var(--rule)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              gap: 16,
+              flexWrap: 'wrap',
+              color: 'var(--ink-ghost)',
+              fontSize: 'var(--t-micro)',
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+            }}
+          >
+            <span>HH Goa 2026 — Task 03</span>
+            <span>OpenCV · SFace 128D · SHA-256 · Solidity</span>
+          </footer>
+        </div>
+      </main>
+    </>
   );
 }

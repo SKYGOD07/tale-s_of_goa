@@ -5,8 +5,8 @@ from app.schemas.face import (
     CompareRequest, CompareResponse, VerificationResponse
 )
 from app.services.face_processor import (
-    decode_base64_image, detect_faces, crop_face_region,
-    generate_128d_embedding, evaluate_face_similarity,
+    decode_base64_image, detect_faces, detect_faces_detailed, crop_face_region,
+    embed_primary_face, evaluate_face_similarity, describe_pipeline,
     extract_pixel_stats, process_face_transformations
 )
 from app.services.hashing import compute_record_hash, compute_comparison_record_hash
@@ -56,7 +56,7 @@ def detect_face_endpoint(payload: DetectRequest):
                 face_crop_width=None,
                 face_crop_height=None,
                 face_crop_pixels=None,
-                standardized_grid_pixels=16384,
+                standardized_grid_pixels=112 * 112,
                 sample_pixels=[SamplePixelSchema(**p) for p in stats["sample_pixels"]]
             )
 
@@ -124,7 +124,7 @@ def encode_face_endpoint(payload: EncodeRequest):
             sample_pixels=[SamplePixelSchema(**p) for p in stats["sample_pixels"]]
         )
 
-        embedding = generate_128d_embedding(face_crop)
+        embedding = embed_primary_face(image_bgr)["embedding"]
 
         if len(embedding) != 128:
             return EncodeResponse(
@@ -249,8 +249,14 @@ def compare_faces_endpoint(payload: CompareRequest):
             sample_pixels=[SamplePixelSchema(**p) for p in stats_b["sample_pixels"]]
         )
 
-        emb_a = generate_128d_embedding(crop_a)
-        emb_b = generate_128d_embedding(crop_b)
+        # Both images traverse the same detect -> alignCrop -> feature path,
+        # so a webcam frame and an uploaded photo are never processed differently.
+        result_a = embed_primary_face(img_a_bgr)
+        result_b = embed_primary_face(img_b_bgr)
+        emb_a = result_a["embedding"]
+        emb_b = result_b["embedding"]
+        print("[COMPARE] A:", describe_pipeline(img_a_bgr, result_a, "image_a"))
+        print("[COMPARE] B:", describe_pipeline(img_b_bgr, result_b, "image_b"))
 
         threshold = payload.threshold or 0.60
         is_match, sim_pct, euc_dist, cos_sim = evaluate_face_similarity(emb_a, emb_b, threshold)

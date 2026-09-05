@@ -6,7 +6,7 @@ import { runSocialSearchPipeline, SocialSearchPipelineResponse } from '../servic
 export function SocialDiscoveryPipeline() {
   const [inputImage, setInputImage] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [threshold, setThreshold] = useState<number>(1.0);
+  const [threshold, setThreshold] = useState<number>(1.128);
   const [loading, setLoading] = useState<boolean>(false);
   const [stepState, setStepState] = useState<number>(0);
   const [result, setResult] = useState<SocialSearchPipelineResponse | null>(null);
@@ -47,6 +47,11 @@ export function SocialDiscoveryPipeline() {
       if (!data.success) {
         setErrorMsg(data.error || 'Failed to complete pipeline');
         setStepState(0);
+      } else if (data.match_found === false) {
+        // The search ran and genuinely found nobody. Show that plainly - the
+        // pipeline must never substitute a stand-in identity here.
+        setResult(data);
+        setStepState(4);
       } else {
         setResult(data);
         setStepState(4); // Completed
@@ -64,20 +69,18 @@ export function SocialDiscoveryPipeline() {
       {/* HEADER BANNER */}
       <div
         style={{
-          background: 'linear-gradient(135deg, rgba(14, 165, 233, 0.15) 0%, rgba(99, 102, 241, 0.15) 100%)',
-          border: '1px solid rgba(56, 189, 248, 0.3)',
+          background: 'var(--surface)',
+          border: '1px solid var(--rule-strong)',
           borderRadius: '16px',
           padding: '1.75rem',
           backdropFilter: 'blur(10px)',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
-          <span style={{ fontSize: '1.5rem' }}>⚡</span>
-          <h2 style={{ margin: 0, fontSize: '1.4rem', color: '#f8fafc', fontWeight: 700 }}>
-            Task 3: Face Identification, Social Media Discovery & Blockchain Verification
+          <h2 style={{ margin: 0, fontSize: '1.4rem', color: '#f4f6f0' }}> Task 3: Face Identification, Social Media Discovery & Blockchain Verification
           </h2>
         </div>
-        <p style={{ margin: 0, fontSize: '0.925rem', color: '#94a3b8', lineHeight: 1.6 }}>
+        <p style={{ margin: 0, fontSize: '0.925rem', color: 'rgba(255,255,255,0.62)', lineHeight: 1.6 }}>
           <strong>Pipeline shape:</strong> Face Scan Input &rarr; Web/Social Media Search (discovering real post) &rarr; Blockchain Upload & Re-Verification.
         </p>
       </div>
@@ -87,8 +90,8 @@ export function SocialDiscoveryPipeline() {
         {/* LEFT: FACE SCAN INPUT */}
         <div
           style={{
-            background: 'rgba(15, 23, 42, 0.75)',
-            border: '1px solid rgba(148, 163, 184, 0.15)',
+            background: 'var(--surface)',
+            border: '1px solid var(--rule-strong)',
             borderRadius: '14px',
             padding: '1.5rem',
             display: 'flex',
@@ -96,15 +99,14 @@ export function SocialDiscoveryPipeline() {
             gap: '1rem',
           }}
         >
-          <h3 style={{ margin: 0, fontSize: '1.1rem', color: '#38bdf8', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <span>👤</span> Step 1: Input Face Scan
+          <h3 style={{ margin: 0, fontSize: '1.1rem', color: '#d3e3bb', display: 'flex', alignItems: 'center', gap: '0.5rem' }}> Step 1: Input Face Scan
           </h3>
 
           <div
             onClick={() => fileInputRef.current?.click()}
             style={{
               height: '240px',
-              border: '2px dashed rgba(56, 189, 248, 0.4)',
+              border: '2px dashed rgba(211, 227, 187, 0.35)',
               borderRadius: '12px',
               display: 'flex',
               flexDirection: 'column',
@@ -112,7 +114,7 @@ export function SocialDiscoveryPipeline() {
               justifyContent: 'center',
               cursor: 'pointer',
               overflow: 'hidden',
-              background: 'rgba(30, 41, 59, 0.4)',
+              background: 'rgba(32, 36, 26, 0.40)',
               position: 'relative',
             }}
           >
@@ -124,10 +126,8 @@ export function SocialDiscoveryPipeline() {
               />
             ) : (
               <div style={{ textAlign: 'center', padding: '1rem' }}>
-                <span style={{ fontSize: '2.5rem', display: 'block', marginBottom: '0.5rem' }}>📷</span>
-                <span style={{ fontSize: '0.95rem', color: '#e2e8f0', fontWeight: 600 }}>Click to Upload Face Scan</span>
-                <span style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginTop: '0.25rem' }}>
-                  Supports JPEG, PNG (Webcam snapshot or photo)
+                <span style={{ fontSize: '0.95rem', color: 'rgba(255,255,255,0.86)', fontWeight: 400 }}>Click to Upload Face Scan</span>
+                <span style={{ display: 'block', fontSize: '0.8rem', color: 'rgba(255,255,255,0.62)', marginTop: '0.25rem' }}> Supports JPEG, PNG (Webcam snapshot or photo)
                 </span>
               </div>
             )}
@@ -145,32 +145,30 @@ export function SocialDiscoveryPipeline() {
               onClick={() => fileInputRef.current?.click()}
               style={{
                 flex: 1,
-                background: '#1e293b',
-                color: '#e2e8f0',
-                border: '1px solid #334155',
+                background: '#20241a',
+                color: 'rgba(255,255,255,0.86)',
+                border: '1px solid #2c3125',
                 padding: '0.6rem',
                 borderRadius: '8px',
                 cursor: 'pointer',
                 fontSize: '0.875rem',
-                fontWeight: 600,
+                fontWeight: 400,
               }}
-            >
-              Choose File
+            > Choose File
             </button>
             {inputImage && (
               <button
                 onClick={() => setInputImage(null)}
                 style={{
-                  background: 'rgba(239, 68, 68, 0.2)',
-                  color: '#f87171',
-                  border: '1px solid rgba(239, 68, 68, 0.4)',
+                  background: 'rgba(224, 133, 133, 0.18)',
+                  color: '#e89a9a',
+                  border: '1px solid rgba(224, 133, 133, 0.35)',
                   padding: '0.6rem 1rem',
                   borderRadius: '8px',
                   cursor: 'pointer',
                   fontSize: '0.875rem',
                 }}
-              >
-                Clear
+              > Clear
               </button>
             )}
           </div>
@@ -179,8 +177,8 @@ export function SocialDiscoveryPipeline() {
         {/* RIGHT: SEARCH CONTROLS */}
         <div
           style={{
-            background: 'rgba(15, 23, 42, 0.75)',
-            border: '1px solid rgba(148, 163, 184, 0.15)',
+            background: 'var(--surface)',
+            border: '1px solid var(--rule-strong)',
             borderRadius: '14px',
             padding: '1.5rem',
             display: 'flex',
@@ -190,47 +188,43 @@ export function SocialDiscoveryPipeline() {
           }}
         >
           <div>
-            <h3 style={{ margin: '0 0 0.75rem 0', fontSize: '1.1rem', color: '#818cf8', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <span>🔍</span> Step 2: Automated Web & Social Discovery
+            <h3 style={{ margin: '0 0 0.75rem 0', fontSize: '1.1rem', color: '#c2d2a8', display: 'flex', alignItems: 'center', gap: '0.5rem' }}> Step 2: Automated Web & Social Discovery
             </h3>
 
             <div
               style={{
-                background: 'rgba(30, 41, 59, 0.6)',
-                border: '1px solid rgba(99, 102, 241, 0.25)',
+                background: 'rgba(32, 36, 26, 0.60)',
+                border: '1px solid rgba(203, 191, 160, 0.22)',
                 borderRadius: '10px',
                 padding: '0.875rem',
                 marginBottom: '1rem',
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.4rem' }}>
-                <span style={{ fontSize: '0.75rem', background: '#3b82f6', color: '#ffffff', padding: '0.15rem 0.5rem', borderRadius: '4px', fontWeight: 600 }}>
-                  AUTO-DISCOVERY
+                <span style={{ fontSize: '0.75rem', background: '#9fb886', color: '#ffffff', padding: '0.15rem 0.5rem', borderRadius: '4px', fontWeight: 400 }}> AUTO-DISCOVERY
                 </span>
-                <span style={{ fontSize: '0.85rem', color: '#f1f5f9', fontWeight: 600 }}>
-                  100% Face-Driven Search
+                <span style={{ fontSize: '0.85rem', color: '#f4f6f0', fontWeight: 400 }}> 100% Face-Driven Search
                 </span>
               </div>
-              <p style={{ margin: 0, fontSize: '0.8rem', color: '#94a3b8', lineHeight: 1.5 }}>
-                No name or keyword needed. The system analyzes the 128D biometric vector of the input face scan, autonomously queries live web & social indices, extracts public candidate post faces, and evaluates biometric distance.
+              <p style={{ margin: 0, fontSize: '0.8rem', color: 'rgba(255,255,255,0.62)', lineHeight: 1.5 }}> No name or keyword needed. The system analyzes the 128D biometric vector of the input face scan, autonomously queries live web & social indices, extracts public candidate post faces, and evaluates biometric distance.
               </p>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginBottom: '1rem' }}>
-              <div style={{ background: '#0f172a', padding: '0.5rem 0.75rem', borderRadius: '8px', border: '1px solid #1e293b' }}>
-                <div style={{ fontSize: '0.7rem', color: '#64748b' }}>SEARCH SCOPE</div>
-                <div style={{ fontSize: '0.8rem', color: '#38bdf8', fontWeight: 600 }}>Live Web & Social Media</div>
+              <div style={{ background: '#171a13', padding: '0.5rem 0.75rem', borderRadius: '8px', border: '1px solid #20241a' }}>
+                <div style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.44)' }}>SEARCH SCOPE</div>
+                <div style={{ fontSize: '0.8rem', color: '#d3e3bb', fontWeight: 400 }}>Live Web & Social Media</div>
               </div>
-              <div style={{ background: '#0f172a', padding: '0.5rem 0.75rem', borderRadius: '8px', border: '1px solid #1e293b' }}>
-                <div style={{ fontSize: '0.7rem', color: '#64748b' }}>BIOMETRIC METRIC</div>
-                <div style={{ fontSize: '0.8rem', color: '#a78bfa', fontWeight: 600 }}>128D Euclidean ($L_2$) + Cosine</div>
+              <div style={{ background: '#171a13', padding: '0.5rem 0.75rem', borderRadius: '8px', border: '1px solid #20241a' }}>
+                <div style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.44)' }}>BIOMETRIC METRIC</div>
+                <div style={{ fontSize: '0.8rem', color: '#cbbfa0', fontWeight: 400 }}>128D Euclidean (L₂) + Cosine</div>
               </div>
             </div>
 
             <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: '#94a3b8', marginBottom: '0.25rem' }}>
-                <span>Match Threshold ($L_2$ Distance):</span>
-                <span style={{ color: '#38bdf8', fontWeight: 600 }}>{threshold.toFixed(2)}</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'rgba(255,255,255,0.62)', marginBottom: '0.25rem' }}>
+                <span>Match Threshold (L₂ distance)</span>
+                <span style={{ color: '#d3e3bb', fontWeight: 400 }}>{threshold.toFixed(2)}</span>
               </div>
               <input
                 type="range"
@@ -239,9 +233,9 @@ export function SocialDiscoveryPipeline() {
                 step="0.05"
                 value={threshold}
                 onChange={(e) => setThreshold(parseFloat(e.target.value))}
-                style={{ width: '100%', accentColor: '#38bdf8' }}
+                style={{ width: '100%', accentColor: '#d3e3bb' }}
               />
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: '#64748b', marginTop: '0.2rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: 'rgba(255,255,255,0.44)', marginTop: '0.2rem' }}>
                 <span>Strict (0.60)</span>
                 <span>Balanced (1.00)</span>
                 <span>Permissive (1.40)</span>
@@ -250,8 +244,7 @@ export function SocialDiscoveryPipeline() {
 
             {/* Optional Collapsible Filter for edge cases (hidden by default) */}
             <details style={{ marginTop: '0.75rem' }}>
-              <summary style={{ fontSize: '0.75rem', color: '#64748b', cursor: 'pointer', outline: 'none' }}>
-                ⚙️ Optional Search Hint (Leave blank for pure face-driven search)
+              <summary style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.44)', cursor: 'pointer', outline: 'none' }}> Optional Search Hint (Leave blank for pure face-driven search)
               </summary>
               <div style={{ marginTop: '0.4rem' }}>
                 <input
@@ -261,9 +254,9 @@ export function SocialDiscoveryPipeline() {
                   placeholder="Optional: specific handle or post URL"
                   style={{
                     width: '100%',
-                    background: '#0f172a',
-                    border: '1px solid #334155',
-                    color: '#f8fafc',
+                    background: '#171a13',
+                    border: '1px solid #2c3125',
+                    color: '#f4f6f0',
                     padding: '0.5rem 0.75rem',
                     borderRadius: '6px',
                     fontSize: '0.8rem',
@@ -280,28 +273,26 @@ export function SocialDiscoveryPipeline() {
             onClick={executePipeline}
             style={{
               width: '100%',
-              background: loading || !inputImage ? '#334155' : 'linear-gradient(135deg, #0284c7 0%, #4f46e5 100%)',
+              background: loading || !inputImage ? '#2c3125' : 'linear-gradient(135deg, #8fa877 0%, #6f8a55 100%)',
               color: '#ffffff',
               border: 'none',
               padding: '0.9rem',
               borderRadius: '10px',
               fontSize: '1rem',
-              fontWeight: 700,
+              fontWeight: 500,
               cursor: loading || !inputImage ? 'not-allowed' : 'pointer',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               gap: '0.5rem',
-              boxShadow: '0 4px 12px rgba(14, 165, 233, 0.3)',
+              boxShadow: '0 4px 12px rgba(211, 227, 187, 0.28)',
             }}
           >
             {loading ? (
-              <>
-                <span style={{ display: 'inline-block', animation: 'spin 1s linear infinite' }}>⏳</span>
-                Running End-to-End Pipeline...
+              <> Running End-to-End Pipeline...
               </>
             ) : (
-              <>🚀 Run End-to-End Task 3 Pipeline</>
+              <> Run End-to-End Task 3 Pipeline</>
             )}
           </button>
         </div>
@@ -310,9 +301,9 @@ export function SocialDiscoveryPipeline() {
       {errorMsg && (
         <div
           style={{
-            background: 'rgba(239, 68, 68, 0.15)',
-            border: '1px solid rgba(239, 68, 68, 0.4)',
-            color: '#fca5a5',
+            background: 'rgba(224, 133, 133, 0.14)',
+            border: '1px solid rgba(224, 133, 133, 0.35)',
+            color: '#f0b8b8',
             padding: '1rem',
             borderRadius: '10px',
             fontSize: '0.9rem',
@@ -326,8 +317,8 @@ export function SocialDiscoveryPipeline() {
       {loading && (
         <div
           style={{
-            background: '#0f172a',
-            border: '1px solid #1e293b',
+            background: '#171a13',
+            border: '1px solid #20241a',
             borderRadius: '12px',
             padding: '1.25rem',
             display: 'flex',
@@ -335,49 +326,89 @@ export function SocialDiscoveryPipeline() {
           }}
         >
           <div style={{ textAlign: 'center', opacity: stepState >= 1 ? 1 : 0.4 }}>
-            <div style={{ fontSize: '1.5rem', marginBottom: '0.25rem' }}>👤</div>
-            <div style={{ fontSize: '0.85rem', color: '#38bdf8', fontWeight: 600 }}>1. Face Ingestion</div>
+            <div style={{ fontSize: '0.85rem', color: '#d3e3bb', fontWeight: 400 }}>1. Face Ingestion</div>
           </div>
           <div style={{ textAlign: 'center', opacity: stepState >= 2 ? 1 : 0.4 }}>
-            <div style={{ fontSize: '1.5rem', marginBottom: '0.25rem' }}>🌐</div>
-            <div style={{ fontSize: '0.85rem', color: '#818cf8', fontWeight: 600 }}>2. Web & Social Search</div>
+            <div style={{ fontSize: '0.85rem', color: '#c2d2a8', fontWeight: 400 }}>2. Web & Social Search</div>
           </div>
           <div style={{ textAlign: 'center', opacity: stepState >= 3 ? 1 : 0.4 }}>
-            <div style={{ fontSize: '1.5rem', marginBottom: '0.25rem' }}>⛓️</div>
-            <div style={{ fontSize: '0.85rem', color: '#34d399', fontWeight: 600 }}>3. Blockchain Upload</div>
+            <div style={{ fontSize: '0.85rem', color: '#9ce0b8', fontWeight: 400 }}>3. Blockchain Upload</div>
           </div>
         </div>
       )}
 
       {/* RESULT CARDS */}
-      {result && (
+      {result && result.match_found === false && (
+        <div
+          style={{
+            background: 'rgba(20, 23, 16, 0.85)',
+            border: '1px solid rgba(232, 196, 106, 0.32)',
+            borderRadius: '16px',
+            padding: '1.75rem',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1rem',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <span className="tag tag--warn">No match</span>
+            <h3 style={{ margin: 0, fontSize: '1.2rem', color: '#f4f6f0' }}>
+              No matching public social media post found
+            </h3>
+          </div>
+          <p style={{ margin: 0, fontSize: '0.85rem', color: 'rgba(255,255,255,0.62)', lineHeight: 1.6 }}>
+            {result.message}
+          </p>
+
+          {result.diagnostics?.search && (
+            <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.44)' }}>
+              <div style={{ marginBottom: '0.5rem' }}>
+                Search: {result.diagnostics.search.mechanisms.join(', ') || 'none available'} &middot;{' '}
+                {result.diagnostics.search.candidates_verified} candidate image(s) checked &middot;
+                threshold L2 &le; {result.diagnostics.search.threshold_l2}
+              </div>
+              {result.diagnostics.search.candidate_report.slice(0, 6).map((c, i) => (
+                <div key={i} style={{ display: 'flex', gap: '0.75rem', padding: '0.3rem 0', borderTop: '1px solid var(--rule)' }}>
+                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {c.image_url}
+                  </span>
+                  <span className="mono" style={{ color: '#d3e3bb' }}>
+                    {c.euclidean_distance != null ? `L2 ${c.euclidean_distance.toFixed(4)}` : (c.error || '-')}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {result && result.match_found !== false && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           {/* SECTION: DISCOVERED SOCIAL MEDIA POST */}
           <div
             style={{
-              background: 'rgba(15, 23, 42, 0.85)',
-              border: '1px solid rgba(56, 189, 248, 0.3)',
+              background: 'rgba(20, 23, 16, 0.85)',
+              border: '1px solid var(--rule-strong)',
               borderRadius: '16px',
               padding: '1.75rem',
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                <span style={{ background: '#3b82f6', color: '#fff', padding: '0.25rem 0.75rem', borderRadius: '20px', fontSize: '0.8rem', fontWeight: 700 }}>
+                <span style={{ background: '#9fb886', color: '#fff', padding: '0.25rem 0.75rem', borderRadius: '20px', fontSize: '0.8rem', fontWeight: 500 }}>
                   {result.discovered_post.platform}
                 </span>
-                <h3 style={{ margin: 0, fontSize: '1.2rem', color: '#f8fafc' }}>
-                  Discovered Social Media Post
+                <h3 style={{ margin: 0, fontSize: '1.2rem', color: '#f4f6f0' }}> Discovered Social Media Post
                 </h3>
               </div>
               <span
                 style={{
-                  background: result.metrics.is_match ? 'rgba(34, 197, 94, 0.2)' : 'rgba(239, 68, 68, 0.2)',
-                  color: result.metrics.is_match ? '#4ade80' : '#f87171',
-                  border: `1px solid ${result.metrics.is_match ? '#22c55e' : '#ef4444'}`,
+                  background: result.metrics.is_match ? 'rgba(141, 219, 168, 0.18)' : 'rgba(224, 133, 133, 0.18)',
+                  color: result.metrics.is_match ? '#a9e3b4' : '#e89a9a',
+                  border: `1px solid ${result.metrics.is_match ? '#8ddba8' : '#e08585'}`,
                   padding: '0.35rem 0.85rem',
                   borderRadius: '20px',
-                  fontWeight: 700,
+                  fontWeight: 500,
                   fontSize: '0.85rem',
                 }}
               >
@@ -389,30 +420,30 @@ export function SocialDiscoveryPipeline() {
               {/* FACE CROPS COMPARISON */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                 <div style={{ textAlign: 'center' }}>
-                  <span style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: '0.25rem' }}>Input Face Crop</span>
+                  <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.62)', display: 'block', marginBottom: '0.25rem' }}>Input Face Crop</span>
                   <img
                     src={result.input_face.crop_base64}
                     alt="Input Face Crop"
-                    style={{ width: '100%', height: '100px', objectFit: 'cover', borderRadius: '8px', border: '1px solid #38bdf8' }}
+                    style={{ width: '100%', height: '100px', objectFit: 'cover', borderRadius: '8px', border: '1px solid #d3e3bb' }}
                   />
                 </div>
                 {result.discovered_post.post_face_crop_base64 && (
                   <div style={{ textAlign: 'center' }}>
-                    <span style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: '0.25rem' }}>Post Face Crop</span>
+                    <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.62)', display: 'block', marginBottom: '0.25rem' }}>Post Face Crop</span>
                     <img
                       src={result.discovered_post.post_face_crop_base64}
                       alt="Post Face Crop"
-                      style={{ width: '100%', height: '100px', objectFit: 'cover', borderRadius: '8px', border: '1px solid #818cf8' }}
+                      style={{ width: '100%', height: '100px', objectFit: 'cover', borderRadius: '8px', border: '1px solid #c2d2a8' }}
                     />
                   </div>
                 )}
                 {result.discovered_post.image_url && (
                   <div style={{ textAlign: 'center' }}>
-                    <span style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: '0.25rem' }}>Full Post Media</span>
+                    <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.62)', display: 'block', marginBottom: '0.25rem' }}>Full Post Media</span>
                     <img
                       src={result.discovered_post.image_url}
                       alt="Full Post"
-                      style={{ width: '100%', maxHeight: '90px', objectFit: 'contain', borderRadius: '8px', border: '1px solid #475569' }}
+                      style={{ width: '100%', maxHeight: '90px', objectFit: 'contain', borderRadius: '8px', border: '1px solid #3c4234' }}
                     />
                   </div>
                 )}
@@ -421,25 +452,25 @@ export function SocialDiscoveryPipeline() {
               {/* POST DETAILS */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                 <div>
-                  <span style={{ fontSize: '0.75rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Author / Account</span>
-                  <div style={{ fontSize: '1.05rem', color: '#f8fafc', fontWeight: 600 }}>@{result.discovered_post.author}</div>
+                  <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.44)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Author / Account</span>
+                  <div style={{ fontSize: '1.05rem', color: '#f4f6f0', fontWeight: 400 }}>@{result.discovered_post.author}</div>
                 </div>
 
                 <div>
-                  <span style={{ fontSize: '0.75rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Post Title / Content</span>
-                  <div style={{ fontSize: '0.95rem', color: '#cbd5e1', lineHeight: 1.5 }}>
+                  <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.44)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Post Title / Content</span>
+                  <div style={{ fontSize: '0.95rem', color: 'rgba(255,255,255,0.78)', lineHeight: 1.5 }}>
                     {result.discovered_post.description || result.discovered_post.title}
                   </div>
                 </div>
 
                 <div>
-                  <span style={{ fontSize: '0.75rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Source Web Link</span>
+                  <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.44)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Source Web Link</span>
                   <div>
                     <a
                       href={result.discovered_post.url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      style={{ color: '#38bdf8', fontSize: '0.85rem', wordBreak: 'break-all' }}
+                      style={{ color: '#d3e3bb', fontSize: '0.85rem', wordBreak: 'break-all' }}
                     >
                       {result.discovered_post.url} &rarr;
                     </a>
@@ -449,7 +480,7 @@ export function SocialDiscoveryPipeline() {
                 {/* BIOMETRIC METRICS BAR */}
                 <div
                   style={{
-                    background: '#0f172a',
+                    background: '#171a13',
                     padding: '0.75rem 1rem',
                     borderRadius: '8px',
                     display: 'flex',
@@ -458,16 +489,16 @@ export function SocialDiscoveryPipeline() {
                   }}
                 >
                   <div>
-                    <span style={{ color: '#64748b' }}>Euclidean Dist: </span>
-                    <strong style={{ color: '#f8fafc' }}>{result.metrics.euclidean_distance}</strong>
+                    <span style={{ color: 'rgba(255,255,255,0.44)' }}>Euclidean Dist: </span>
+                    <strong style={{ color: '#f4f6f0' }}>{result.metrics.euclidean_distance}</strong>
                   </div>
                   <div>
-                    <span style={{ color: '#64748b' }}>Cosine Sim: </span>
-                    <strong style={{ color: '#f8fafc' }}>{result.metrics.cosine_similarity}</strong>
+                    <span style={{ color: 'rgba(255,255,255,0.44)' }}>Cosine Sim: </span>
+                    <strong style={{ color: '#f4f6f0' }}>{result.metrics.cosine_similarity}</strong>
                   </div>
                   <div>
-                    <span style={{ color: '#64748b' }}>Threshold: </span>
-                    <strong style={{ color: '#38bdf8' }}>{threshold}</strong>
+                    <span style={{ color: 'rgba(255,255,255,0.44)' }}>Threshold: </span>
+                    <strong style={{ color: '#d3e3bb' }}>{threshold}</strong>
                   </div>
                 </div>
               </div>
@@ -477,69 +508,66 @@ export function SocialDiscoveryPipeline() {
           {/* SECTION: BLOCKCHAIN PROOF & RE-VERIFICATION */}
           <div
             style={{
-              background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(15, 23, 42, 0.9) 100%)',
-              border: '1px solid rgba(16, 185, 129, 0.3)',
+              background: 'var(--surface)',
+              border: '1px solid rgba(127, 214, 162, 0.28)',
               borderRadius: '16px',
               padding: '1.75rem',
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                <span style={{ fontSize: '1.4rem' }}>⛓️</span>
-                <h3 style={{ margin: 0, fontSize: '1.2rem', color: '#f8fafc' }}>
-                  Blockchain Proof Commitment & Re-Verification
+                <h3 style={{ margin: 0, fontSize: '1.2rem', color: '#f4f6f0' }}> Blockchain Proof Commitment & Re-Verification
                 </h3>
               </div>
               <span
                 style={{
-                  background: 'rgba(16, 185, 129, 0.2)',
-                  color: '#34d399',
-                  border: '1px solid #10b981',
+                  background: 'rgba(127, 214, 162, 0.16)',
+                  color: '#9ce0b8',
+                  border: '1px solid #7fd6a2',
                   padding: '0.35rem 0.85rem',
                   borderRadius: '20px',
-                  fontWeight: 700,
+                  fontWeight: 500,
                   fontSize: '0.85rem',
                 }}
-              >
-                CONFIRMED ON-CHAIN
+              > CONFIRMED ON-CHAIN
               </span>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.25rem', fontSize: '0.875rem' }}>
               <div>
-                <span style={{ color: '#64748b', display: 'block', marginBottom: '0.2rem' }}>SHA-256 Record Fingerprint:</span>
-                <code style={{ background: '#020617', padding: '0.4rem 0.6rem', borderRadius: '6px', color: '#38bdf8', display: 'block', wordBreak: 'break-all' }}>
+                <span style={{ color: 'rgba(255,255,255,0.44)', display: 'block', marginBottom: '0.2rem' }}>SHA-256 Record Fingerprint:</span>
+                <code style={{ background: '#12140f', padding: '0.4rem 0.6rem', borderRadius: '6px', color: '#d3e3bb', display: 'block', wordBreak: 'break-all' }}>
                   {result.record_hash}
                 </code>
               </div>
 
               <div>
-                <span style={{ color: '#64748b', display: 'block', marginBottom: '0.2rem' }}>EVM Transaction Hash:</span>
-                <code style={{ background: '#020617', padding: '0.4rem 0.6rem', borderRadius: '6px', color: '#a78bfa', display: 'block', wordBreak: 'break-all' }}>
+                <span style={{ color: 'rgba(255,255,255,0.44)', display: 'block', marginBottom: '0.2rem' }}>EVM Transaction Hash:</span>
+                <code style={{ background: '#12140f', padding: '0.4rem 0.6rem', borderRadius: '6px', color: '#cbbfa0', display: 'block', wordBreak: 'break-all' }}>
                   {result.blockchain_upload.transaction_hash}
                 </code>
               </div>
 
               <div>
-                <span style={{ color: '#64748b', display: 'block', marginBottom: '0.2rem' }}>Block Number:</span>
-                <strong style={{ color: '#f8fafc' }}>#{result.blockchain_upload.block_number || 'Mined'}</strong>
+                <span style={{ color: 'rgba(255,255,255,0.44)', display: 'block', marginBottom: '0.2rem' }}>Block Number:</span>
+                <strong style={{ color: '#f4f6f0' }}>#{result.blockchain_upload.block_number || 'Mined'}</strong>
               </div>
 
               <div>
-                <span style={{ color: '#64748b', display: 'block', marginBottom: '0.2rem' }}>Network:</span>
-                <strong style={{ color: '#f8fafc' }}>{result.blockchain_upload.network}</strong>
+                <span style={{ color: 'rgba(255,255,255,0.44)', display: 'block', marginBottom: '0.2rem' }}>Network:</span>
+                <strong style={{ color: '#f4f6f0' }}>{result.blockchain_upload.network}</strong>
               </div>
 
               <div>
-                <span style={{ color: '#64748b', display: 'block', marginBottom: '0.2rem' }}>Smart Contract Status:</span>
-                <strong style={{ color: '#34d399' }}>
-                  {result.onchain_reverification.exists_on_chain ? '✓ Exists On-Chain (Verified via getVerification)' : 'Pending'}
+                <span style={{ color: 'rgba(255,255,255,0.44)', display: 'block', marginBottom: '0.2rem' }}>Smart Contract Status:</span>
+                <strong style={{ color: '#9ce0b8' }}>
+                  {result.onchain_reverification.exists_on_chain ? 'Exists On-Chain (Verified via getVerification)' : 'Pending'}
                 </strong>
               </div>
 
               <div>
-                <span style={{ color: '#64748b', display: 'block', marginBottom: '0.2rem' }}>Recorder Account:</span>
-                <code style={{ color: '#94a3b8', fontSize: '0.8rem' }}>
+                <span style={{ color: 'rgba(255,255,255,0.44)', display: 'block', marginBottom: '0.2rem' }}>Recorder Account:</span>
+                <code style={{ color: 'rgba(255,255,255,0.62)', fontSize: '0.8rem' }}>
                   {result.onchain_reverification.recorder || '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266'}
                 </code>
               </div>

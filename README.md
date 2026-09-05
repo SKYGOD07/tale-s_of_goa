@@ -6,6 +6,30 @@
 
 ---
 
+## 📚 Documentation
+
+| Guide | Covers |
+|---|---|
+| **[docs/README.md](docs/README.md)** | Documentation index |
+| **[docs/SETUP.md](docs/SETUP.md)** | Installing the three stacks, env file, models |
+| **[docs/OPERATIONS.md](docs/OPERATIONS.md)** | Running it, API keys, terminal-only operation, recording script |
+| **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** | How the pipeline works internally |
+| **[docs/API.md](docs/API.md)** | All nine HTTP endpoints with real examples |
+| **[docs/BLOCKCHAIN.md](docs/BLOCKCHAIN.md)** | Contract, gas, tamper-evidence, terminal commands |
+| **[docs/TASK.md](docs/TASK.md)** | The brief verbatim + compliance evidence |
+
+**Terminal-only quick start** (no browser, no API keys):
+
+```powershell
+cd blockchain; npm run node            # terminal 1
+cd blockchain; npm run deploy:local    # terminal 2 -> paste address into backend/.env
+cd ..\backend
+.\.venv\Scripts\python.exe run_pipeline.py --image face.jpg --query "Name"
+.\.venv\Scripts\python.exe verify_chain.py demo
+```
+
+---
+
 ## 📌 Executive Summary
 
 This repository implements the complete end-to-end pipeline required for **HH Goa 2026 Task #3**:
@@ -52,6 +76,31 @@ flowchart TD
 ---
 
 ## 🚀 Quick Start Guide
+
+### Step 0: Install dependencies
+
+Each directory has its own toolchain — see **[docs/SETUP.md](docs/SETUP.md)** for
+the full walkthrough, including Ethereum Sepolia testnet configuration.
+
+```powershell
+# Backend  — Python, NOT npm
+cd backend
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+
+# Blockchain
+cd ..\blockchain
+npm install
+
+# Frontend
+cd ..\frontend
+npm install
+```
+
+> `backend/` has no `package.json`. `npm install` there will fail with
+> `ENOENT` — use `pip` in the virtualenv as shown above.
+
+---
 
 ### Step 1: Start the Local Blockchain (Terminal 1)
 ```bash
@@ -120,9 +169,9 @@ python run_pipeline.py --query "Linus Torvalds"
 You can also run and record the pipeline using the Next.js interactive interface:
 
 #### 1. Start FastAPI Backend (Terminal 2):
-```bash
+```powershell
 cd backend
-python run.py
+.\.venv\Scripts\python.exe run.py
 ```
 *API available at `http://localhost:8000` (Swagger docs at `http://localhost:8000/docs`).*
 

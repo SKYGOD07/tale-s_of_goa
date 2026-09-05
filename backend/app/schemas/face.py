@@ -67,12 +67,21 @@ class VerificationResponse(BaseModel):
     status: str
     timestamp: str
     block_number: Optional[int] = None
+    # True when the RPC/contract/key is not configured and the result is a local
+    # dry run rather than a broadcast transaction.
+    simulated: bool = False
+    chain_id: Optional[int] = None
+    explorer_url: Optional[str] = None
+    gas_used: Optional[int] = None
     error: Optional[str] = None
 
 class CompareRequest(BaseModel):
     image_a: str = Field(..., description="Base64 encoded Camera / Live image frame")
     image_b: str = Field(..., description="Base64 encoded Reference / Social media image frame")
-    threshold: Optional[float] = Field(default=0.60, description="Euclidean distance threshold for match decision")
+    # SFace's published L2 operating point. 0.60 was inherited from the old
+    # unaligned embedding and is far too strict for aligned SFace features:
+    # genuine same-person pairs land around 0.85, so 0.60 rejected real matches.
+    threshold: Optional[float] = Field(default=1.128, description="SFace L2 distance threshold for match decision")
     auto_record_on_chain: Optional[bool] = Field(default=False, description="Automatically submit verified record to EVM blockchain")
 
 class CompareResponse(BaseModel):
@@ -109,4 +118,23 @@ class VerificationQueryResponse(BaseModel):
     timestamp_iso: Optional[str] = None
     recorder: Optional[str] = None
     network: str
+    chain_id: Optional[int] = None
+    simulated: bool = False
+    explorer_url: Optional[str] = None
     error: Optional[str] = None
+
+
+class ChainStatusResponse(BaseModel):
+    chain_id: int
+    network: str
+    rpc_url: str
+    contract_address: Optional[str] = None
+    explorer_url: Optional[str] = None
+    configured: bool
+    connected: bool
+    live: bool
+    account: Optional[str] = None
+    balance_eth: Optional[float] = None
+    block_number: Optional[int] = None
+    message: str = ""
+

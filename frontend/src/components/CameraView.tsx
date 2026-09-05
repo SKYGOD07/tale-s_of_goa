@@ -4,6 +4,9 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { FaceOverlay } from './FaceOverlay';
 import { FaceBox } from '../services/api';
 
+/** Longest edge sent to the face detector. The preview stays at full 720p. */
+const DETECTION_MAX_WIDTH = 640;
+
 interface CameraViewProps {
   onFrameCaptured: (base64Image: string) => void;
   faces: FaceBox[];
@@ -98,15 +101,23 @@ export const CameraView: React.FC<CameraViewProps> = ({
       const canvas = canvasRef.current;
       if (!video || !canvas || video.readyState < 2) return;
 
-      const width = video.videoWidth || 640;
-      const height = video.videoHeight || 480;
+      const srcWidth = video.videoWidth || 640;
+      const srcHeight = video.videoHeight || 480;
+
+      // The camera is requested at 720p for a sharp preview, but every sampled
+      // frame is JPEG-encoded on the main thread and POSTed to the detector.
+      // Downscaling to 640px wide first cuts the encode and the payload by
+      // roughly 4x; Haar detection gains nothing from the extra resolution.
+      const scale = Math.min(1, DETECTION_MAX_WIDTH / srcWidth);
+      const width = Math.round(srcWidth * scale);
+      const height = Math.round(srcHeight * scale);
 
       canvas.width = width;
       canvas.height = height;
       const ctx = canvas.getContext('2d');
       if (ctx) {
         ctx.drawImage(video, 0, 0, width, height);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
         onFrameCaptured(dataUrl);
       }
     }, samplingIntervalMs);
@@ -121,7 +132,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
         position: 'relative',
         width: '100%',
         height: '420px',
-        background: '#020617',
+        background: '#12140f',
         borderRadius: '12px',
         overflow: 'hidden',
         border: '1px solid rgba(255, 255, 255, 0.1)',
@@ -133,13 +144,11 @@ export const CameraView: React.FC<CameraViewProps> = ({
       <canvas ref={canvasRef} style={{ display: 'none' }} />
 
       {cameraError ? (
-        <div style={{ textAlign: 'center', padding: '24px', color: '#ef4444' }}>
-          <div style={{ fontSize: '2.5rem', marginBottom: '12px' }}>📷 ✕</div>
-          <div style={{ fontWeight: 700, fontSize: '1rem', marginBottom: '8px' }}>
-            Camera Access Required
+        <div style={{ textAlign: 'center', padding: '24px', color: '#e08585' }}>
+          <div style={{ fontSize: '2.5rem', marginBottom: '12px' }}> </div>
+          <div style={{ fontWeight: 500, fontSize: '1rem', marginBottom: '8px' }}> Camera Access Required
           </div>
-          <div style={{ fontSize: '0.875rem', color: '#94a3b8', maxWidth: '400px' }}>
-            Camera access is required to generate your Face ID. Please allow camera permissions in your browser settings.
+          <div style={{ fontSize: '0.875rem', color: 'rgba(255,255,255,0.62)', maxWidth: '400px' }}> Camera access is required to generate your Face ID. Please allow camera permissions in your browser settings.
           </div>
         </div>
       ) : (
@@ -159,6 +168,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
           />
 
           <FaceOverlay
+            objectFit="cover"
             faces={faces}
             imageWidth={imageWidth}
             imageHeight={imageHeight}
@@ -178,11 +188,11 @@ export const CameraView: React.FC<CameraViewProps> = ({
               right: '12px',
               background: isMirrored ? 'rgba(212, 175, 55, 0.2)' : 'rgba(0,0,0,0.6)',
               border: `1px solid ${isMirrored ? '#d4af37' : 'rgba(255,255,255,0.2)'}`,
-              color: isMirrored ? '#d4af37' : '#94a3b8',
+              color: isMirrored ? '#d4af37' : 'rgba(255,255,255,0.62)',
               borderRadius: '8px',
               padding: '6px 10px',
               fontSize: '0.75rem',
-              fontWeight: 600,
+              fontWeight: 400,
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
@@ -191,7 +201,6 @@ export const CameraView: React.FC<CameraViewProps> = ({
               zIndex: 10,
             }}
           >
-            <span>🪞</span>
             <span>{isMirrored ? 'Mirrored' : 'Unmirrored'}</span>
           </button>
 
@@ -201,14 +210,14 @@ export const CameraView: React.FC<CameraViewProps> = ({
               position: 'absolute',
               bottom: '12px',
               left: '12px',
-              background: 'rgba(2, 6, 23, 0.85)',
+              background: 'rgba(14, 16, 12, 0.85)',
               backdropFilter: 'blur(8px)',
               padding: '6px 14px',
               borderRadius: '20px',
               border: '1px solid rgba(255, 255, 255, 0.15)',
-              color: '#f8fafc',
+              color: '#f4f6f0',
               fontSize: '0.75rem',
-              fontWeight: 600,
+              fontWeight: 400,
               fontFamily: 'monospace',
               display: 'flex',
               alignItems: 'center',
@@ -220,7 +229,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
                 width: '8px',
                 height: '8px',
                 borderRadius: '50%',
-                background: faces.length === 1 ? '#10b981' : faces.length > 1 ? '#f59e0b' : '#ef4444',
+                background: faces.length === 1 ? '#7fd6a2' : faces.length > 1 ? '#e8c46a' : '#e08585',
               }}
             />
             {statusMessage || 'SEARCHING FOR FACE...'}

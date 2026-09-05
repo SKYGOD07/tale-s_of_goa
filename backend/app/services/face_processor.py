@@ -1,51 +1,154 @@
+"""
+Face detection and recognition.
+
+This is the official OpenCV Zoo pipeline, not a bespoke one:
+
+    YuNet.detect()        -> bounding box + 5 facial landmarks
+    SFace.alignCrop()     -> landmark-aligned 112x112 crop
+    SFace.feature()       -> 128-D identity embedding
+    SFace.match()         -> cosine / L2 distance
+
+Alignment is the part that matters. SFace is trained on faces warped to a
+canonical position using the five landmarks; feeding it a loosely padded
+detector box that has merely been resized to 112x112 costs most of its
+discriminative power, which is what produced same-person cosine scores
+around 0.17. There is deliberately no fallback embedding: if a model is
+missing the pipeline raises, rather than silently degrading to something
+that cannot recognise anyone.
+"""
+
 import base64
 import io
 import os
-import cv2
-import numpy as np
-from PIL import Image
+from dataclasses import dataclass, field
 from typing import List, Tuple, Dict, Any, Optional
 
-# Load OpenCV Cascade Face Classifiers for robust multi-angle face detection
-FACE_CASCADE_DEFAULT = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-FACE_CASCADE_ALT2 = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_alt2.xml')
+import cv2
+import numpy as np
+from PIL import Image, ImageOps
 
-# Load SFace DNN Face Recognizer (pre-trained deep neural network for face identity)
-# This produces REAL identity-discriminative 128D embeddings unlike basic image statistics.
-_SFACE_MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'face_recognition_sface_2021dec.onnx')
-_SFACE_RECOGNIZER = None
-if os.path.exists(_SFACE_MODEL_PATH):
+_MODEL_DIR = os.path.dirname(os.path.abspath(__file__))
+_YUNET_MODEL_PATH = os.path.join(_MODEL_DIR, "face_detection_yunet_2023mar.onnx")
+_SFACE_MODEL_PATH = os.path.join(_MODEL_DIR, "face_recognition_sface_2021dec.onnx")
+
+# OpenCV's published operating points for SFace. cosine >= 0.363 and
+# L2 <= 1.128 are the same decision boundary: for unit vectors
+# L2 = sqrt(2 * (1 - cosine)), and sqrt(2 * (1 - 0.363)) = 1.1287.
+SFACE_COSINE_THRESHOLD = 0.363
+SFACE_L2_THRESHOLD = 1.128
+
+# YuNet confidence floor. 0.6 keeps profile and partially lit faces that 0.9
+# discards, while still rejecting texture noise.
+YUNET_SCORE_THRESHOLD = 0.6
+YUNET_NMS_THRESHOLD = 0.3
+YUNET_TOP_K = 5000
+
+# The distance-type enum moved between OpenCV releases; resolve it once here
+# rather than pinning a name that varies by version.
+_DIS_COSINE = getattr(cv2, "FaceRecognizerSF_FR_COSINE",
+                      getattr(cv2, "FaceRecognizerSF_DisType_FR_COSINE", 0))
+_DIS_NORM_L2 = getattr(cv2, "FaceRecognizerSF_FR_NORM_L2",
+                       getattr(cv2, "FaceRecognizerSF_DisType_FR_NORM_L2", 1))
+
+MODEL_NAME_DETECTOR = "YuNet (face_detection_yunet_2023mar.onnx)"
+MODEL_NAME_RECOGNIZER = "SFace (face_recognition_sface_2021dec.onnx)"
+
+
+class ModelUnavailable(RuntimeError):
+    """Raised when a required ONNX model is missing or will not load."""
+
+
+def _load_detector() -> Optional[cv2.FaceDetectorYN]:
+    if not os.path.exists(_YUNET_MODEL_PATH):
+        print(f"[FACE] YuNet model missing at {_YUNET_MODEL_PATH}")
+        return None
     try:
-        _SFACE_RECOGNIZER = cv2.FaceRecognizerSF.create(_SFACE_MODEL_PATH, "")
-        print(f"[FACE] SFace DNN face recognizer loaded successfully from {_SFACE_MODEL_PATH}")
+        det = cv2.FaceDetectorYN.create(
+            _YUNET_MODEL_PATH, "", (320, 320),
+            YUNET_SCORE_THRESHOLD, YUNET_NMS_THRESHOLD, YUNET_TOP_K,
+        )
+        print(f"[FACE] YuNet DNN face detector loaded from {_YUNET_MODEL_PATH}")
+        return det
     except Exception as e:
-        print(f"[FACE] Warning: Could not load SFace model: {e}. Falling back to basic embeddings.")
-else:
-    print(f"[FACE] Warning: SFace model not found at {_SFACE_MODEL_PATH}. Using basic embeddings.")
+        print(f"[FACE] YuNet failed to load: {e}")
+        return None
+
+
+def _load_recognizer() -> Optional[cv2.FaceRecognizerSF]:
+    if not os.path.exists(_SFACE_MODEL_PATH):
+        print(f"[FACE] SFace model missing at {_SFACE_MODEL_PATH}")
+        return None
+    try:
+        rec = cv2.FaceRecognizerSF.create(_SFACE_MODEL_PATH, "")
+        print(f"[FACE] SFace DNN face recognizer loaded from {_SFACE_MODEL_PATH}")
+        return rec
+    except Exception as e:
+        print(f"[FACE] SFace failed to load: {e}")
+        return None
+
+
+_DETECTOR = _load_detector()
+_RECOGNIZER = _load_recognizer()
+
+
+def models_ready() -> Dict[str, Any]:
+    """Reported by the API so the UI can state which models are actually in use."""
+    return {
+        "detector": MODEL_NAME_DETECTOR if _DETECTOR is not None else None,
+        "recognizer": MODEL_NAME_RECOGNIZER if _RECOGNIZER is not None else None,
+        "detector_loaded": _DETECTOR is not None,
+        "recognizer_loaded": _RECOGNIZER is not None,
+        "embedding_dimension": 128,
+        "normalization": "L2 unit norm",
+        "cosine_threshold": SFACE_COSINE_THRESHOLD,
+        "l2_threshold": SFACE_L2_THRESHOLD,
+    }
+
+
+@dataclass
+class FaceDetection:
+    """One detected face: the box for display, the raw YuNet row for alignment."""
+    box: Dict[str, int]
+    score: float
+    landmarks: List[Tuple[int, int]] = field(default_factory=list)
+    # YuNet's 15-value row [x, y, w, h, 5x(lx, ly), score]. alignCrop needs it
+    # verbatim, so it is carried through rather than reconstructed from the box.
+    raw: Optional[np.ndarray] = None
+
+    @property
+    def width(self) -> int:
+        return self.box["right"] - self.box["left"]
+
+    @property
+    def height(self) -> int:
+        return self.box["bottom"] - self.box["top"]
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Image IO
+# ─────────────────────────────────────────────────────────────────────────
 
 def decode_base64_image(base64_string: str) -> np.ndarray:
-    """
-    Decodes base64 string (with or without data URL prefix) into OpenCV BGR numpy array.
-    """
+    """Decodes base64 (with or without data URL prefix) into an OpenCV BGR array."""
     if not base64_string or not isinstance(base64_string, str):
         raise ValueError("Image base64 string is empty or invalid")
 
     if ',' in base64_string:
         base64_string = base64_string.split(',')[1]
-
-    # Clean whitespace or line breaks if present
     base64_string = base64_string.strip()
 
     image_bytes = base64.b64decode(base64_string)
-    image = Image.open(io.BytesIO(image_bytes)).convert('RGB')
-    open_cv_image = np.array(image)
-    # Convert RGB to BGR for OpenCV processing
-    return cv2.cvtColor(open_cv_image, cv2.COLOR_RGB2BGR)
+    image = Image.open(io.BytesIO(image_bytes))
+    # Photos off a phone or camera are stored unrotated with an EXIF Orientation
+    # tag describing the turn. Applying it must happen before convert(), which
+    # drops the EXIF block; otherwise portrait photos arrive sideways.
+    image = ImageOps.exif_transpose(image)
+    image = image.convert('RGB')
+    return cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+
 
 def encode_image_to_base64(img_ndarray: np.ndarray, format_ext: str = ".jpg") -> str:
-    """
-    Encodes OpenCV BGR or Grayscale numpy array into a Base64 data URL string.
-    """
+    """Encodes an OpenCV BGR or grayscale array into a base64 data URL."""
     if img_ndarray is None or img_ndarray.size == 0:
         return ""
     success, buffer = cv2.imencode(format_ext, img_ndarray, [cv2.IMWRITE_JPEG_QUALITY, 90])
@@ -53,6 +156,7 @@ def encode_image_to_base64(img_ndarray: np.ndarray, format_ext: str = ".jpg") ->
         return ""
     b64_str = base64.b64encode(buffer).decode('utf-8')
     return f"data:image/jpeg;base64,{b64_str}"
+
 
 def extract_pixel_stats(image_bgr: np.ndarray, crop_bgr: Optional[np.ndarray] = None) -> Dict[str, Any]:
     """
@@ -102,9 +206,11 @@ def extract_pixel_stats(image_bgr: np.ndarray, crop_bgr: Optional[np.ndarray] = 
         "face_crop_width": int(crop_bgr.shape[1]) if crop_bgr is not None else None,
         "face_crop_height": int(crop_bgr.shape[0]) if crop_bgr is not None else None,
         "face_crop_pixels": crop_pixels,
-        "standardized_grid_pixels": 16384, # 128x128 grid
+        # The aligned crop SFace actually consumes is 112x112.
+        "standardized_grid_pixels": 112 * 112,
         "sample_pixels": sample_pixels
     }
+
 
 def process_face_transformations(face_bgr: np.ndarray) -> Tuple[str, str, str]:
     """
@@ -112,96 +218,112 @@ def process_face_transformations(face_bgr: np.ndarray) -> Tuple[str, str, str]:
     1. RGB Face Crop
     2. 8-Bit Grayscale Face Crop (cv2.COLOR_BGR2GRAY)
     3. Histogram Equalized Face Matrix (cv2.equalizeHist)
+
+    These are visualisation only. The embedding is computed from the aligned
+    colour crop, never from these grayscale previews.
     """
     if face_bgr is None or face_bgr.size == 0:
         return "", "", ""
 
-    # 1. RGB Crop
     rgb_crop_b64 = encode_image_to_base64(face_bgr)
-
-    # 2. Grayscale Crop
     gray_face = cv2.cvtColor(face_bgr, cv2.COLOR_BGR2GRAY)
     gray_crop_b64 = encode_image_to_base64(gray_face)
-
-    # 3. Histogram Equalized Crop
     equalized_face = cv2.equalizeHist(gray_face)
     equalized_crop_b64 = encode_image_to_base64(equalized_face)
 
     return rgb_crop_b64, gray_crop_b64, equalized_crop_b64
 
-def detect_faces(image_bgr: np.ndarray) -> Tuple[List[Dict[str, int]], int, int]:
-    """
-    Detects faces in BGR image array using multi-scale ensemble classifier.
-    Returns (list of bounding boxes in {top, right, bottom, left} format, width, height).
-    """
-    height, width, _ = image_bgr.shape
-    gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
-    gray = cv2.equalizeHist(gray)
 
-    # Primary detection with frontalface_default
-    rects = FACE_CASCADE_DEFAULT.detectMultiScale(
-        gray,
-        scaleFactor=1.1,
-        minNeighbors=4,
-        minSize=(40, 40),
-        flags=cv2.CASCADE_SCALE_IMAGE
-    )
+# ─────────────────────────────────────────────────────────────────────────
+# Detection
+# ─────────────────────────────────────────────────────────────────────────
 
-    # Fallback to frontalface_alt2 if no faces detected
-    if len(rects) == 0:
-        rects = FACE_CASCADE_ALT2.detectMultiScale(
-            gray,
-            scaleFactor=1.05,
-            minNeighbors=2,
-            minSize=(30, 30),
-            flags=cv2.CASCADE_SCALE_IMAGE
+def detect_faces_detailed(image_bgr: np.ndarray) -> Tuple[List[FaceDetection], int, int]:
+    """
+    Runs YuNet over the full image and returns every face, largest first.
+
+    No centre-crop, no square assumption, no aspect-ratio massaging: the
+    detector sees the image at its own resolution and the boxes come back in
+    original image coordinates.
+    """
+    if _DETECTOR is None:
+        raise ModelUnavailable(
+            f"YuNet detector not available. Expected {_YUNET_MODEL_PATH}. "
+            "Download face_detection_yunet_2023mar.onnx from the OpenCV Zoo."
         )
+    if image_bgr is None or image_bgr.size == 0:
+        raise ValueError("Empty image supplied to the face detector")
 
-    # Fallback to skin-color & facial contour segmentation if Haar cascades fail (e.g. synthetic test frames)
-    if len(rects) == 0:
-        hsv = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2HSV)
-        # Skin tone range in HSV
-        lower_skin = np.array([0, 20, 70], dtype=np.uint8)
-        upper_skin = np.array([30, 255, 255], dtype=np.uint8)
-        mask = cv2.inRange(hsv, lower_skin, upper_skin)
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        valid_contours = [c for c in contours if cv2.contourArea(c) > (width * height * 0.05)]
-        if valid_contours:
-            largest_c = max(valid_contours, key=cv2.contourArea)
-            x, y, w, h = cv2.boundingRect(largest_c)
-            # Ensure aspect ratio is face-like (height/width between 0.8 and 2.2)
-            aspect = float(h) / max(1, float(w))
-            if 0.7 <= aspect <= 2.5 and w >= 40 and h >= 40:
-                rects = [(x, y, w, h)]
+    height, width = image_bgr.shape[:2]
 
-    # Enforce single-face constraint: prioritize primary (largest) face if multiple detected
-    if len(rects) > 1:
-        rects = sorted(rects, key=lambda r: r[2] * r[3], reverse=True)[:1]
+    # YuNet is fully convolutional but wants the input size declared. Very large
+    # photos are scaled down for detection only - the boxes are mapped back, so
+    # the crop is still taken from the original pixels.
+    max_side = 1024
+    scale = min(1.0, max_side / max(width, height))
+    if scale < 1.0:
+        det_img = cv2.resize(image_bgr, (int(width * scale), int(height * scale)),
+                             interpolation=cv2.INTER_AREA)
+    else:
+        det_img = image_bgr
 
-    boxes = []
-    for (x, y, w, h) in rects:
-        boxes.append({
-            "top": int(y),
-            "right": int(x + w),
-            "bottom": int(y + h),
-            "left": int(x)
-        })
+    dh, dw = det_img.shape[:2]
+    _DETECTOR.setInputSize((dw, dh))
+    _, raw_faces = _DETECTOR.detect(det_img)
 
-    return boxes, width, height
+    detections: List[FaceDetection] = []
+    if raw_faces is not None:
+        inv = 1.0 / scale
+        for row in raw_faces:
+            x, y, w, h = row[0:4]
+            score = float(row[14])
+
+            landmarks = [
+                (int(round(row[4 + i * 2] * inv)), int(round(row[5 + i * 2] * inv)))
+                for i in range(5)
+            ]
+
+            box = {
+                "top": max(0, int(round(y * inv))),
+                "left": max(0, int(round(x * inv))),
+                "bottom": min(height, int(round((y + h) * inv))),
+                "right": min(width, int(round((x + w) * inv))),
+            }
+            if box["right"] <= box["left"] or box["bottom"] <= box["top"]:
+                continue
+
+            # alignCrop consumes the row in detector coordinates, so keep a copy
+            # rescaled to the original image alongside it.
+            raw = row.copy()
+            if scale < 1.0:
+                raw[0:14] = raw[0:14] * inv
+
+            detections.append(
+                FaceDetection(box=box, score=score, landmarks=landmarks, raw=raw)
+            )
+
+    detections.sort(key=lambda d: d.width * d.height, reverse=True)
+    return detections, width, height
+
+
+def detect_faces(image_bgr: np.ndarray) -> Tuple[List[Dict[str, int]], int, int]:
+    """Backwards-compatible wrapper returning plain boxes."""
+    detections, width, height = detect_faces_detailed(image_bgr)
+    return [d.box for d in detections], width, height
+
 
 def crop_face_region(image_bgr: np.ndarray, box: Dict[str, int], padding_pct: float = 0.15) -> np.ndarray:
     """
-    Crops face region with configurable percentage padding.
-    """
-    h_img, w_img, _ = image_bgr.shape
-    top, right, bottom, left = box["top"], box["right"], box["bottom"], box["left"]
-    
-    w = right - left
-    h = bottom - top
+    Padded box crop, for display only.
 
-    pad_w = int(w * padding_pct)
-    pad_h = int(h * padding_pct)
+    Recognition does NOT use this - it uses align_face(), because a padded box
+    is not what SFace was trained on.
+    """
+    h_img, w_img = image_bgr.shape[:2]
+    top, right, bottom, left = box["top"], box["right"], box["bottom"], box["left"]
+
+    pad_h = int((bottom - top) * padding_pct)
+    pad_w = int((right - left) * padding_pct)
 
     crop_top = max(0, top - pad_h)
     crop_bottom = min(h_img, bottom + pad_h)
@@ -210,118 +332,180 @@ def crop_face_region(image_bgr: np.ndarray, box: Dict[str, int], padding_pct: fl
 
     return image_bgr[crop_top:crop_bottom, crop_left:crop_right]
 
-def generate_128d_embedding(face_bgr: np.ndarray) -> List[float]:
+
+# ─────────────────────────────────────────────────────────────────────────
+# Alignment + embedding
+# ─────────────────────────────────────────────────────────────────────────
+
+def align_face(image_bgr: np.ndarray, detection: FaceDetection) -> np.ndarray:
+    """Warps the face to SFace's canonical 112x112 using the 5 landmarks."""
+    if _RECOGNIZER is None:
+        raise ModelUnavailable(
+            f"SFace recognizer not available. Expected {_SFACE_MODEL_PATH}."
+        )
+    if detection.raw is None:
+        raise ValueError("Detection carries no landmark row; cannot align.")
+    return _RECOGNIZER.alignCrop(image_bgr, detection.raw)
+
+
+def encode_aligned_face(aligned_bgr: np.ndarray) -> np.ndarray:
+    """SFace feature for an already-aligned 112x112 crop. Returns a 1x128 float32."""
+    if _RECOGNIZER is None:
+        raise ModelUnavailable("SFace recognizer not available.")
+    if aligned_bgr is None or aligned_bgr.size == 0:
+        raise ValueError("Empty aligned crop supplied to the recognizer")
+    return _RECOGNIZER.feature(aligned_bgr)
+
+
+def encode_face(image_bgr: np.ndarray, detection: FaceDetection) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Generates a normalized 128-dimensional face identity embedding vector.
-    Uses OpenCV SFace DNN (pre-trained deep neural network) when available.
-    Falls back to handcrafted features if DNN model is not loaded.
+    Full detection -> identity path: align, then embed.
+
+    Every caller uses this, so a webcam frame and an uploaded photo are
+    processed identically end to end.
     """
-    if face_bgr is None or face_bgr.size == 0:
-        raise ValueError("Invalid face crop for embedding extraction")
+    aligned = align_face(image_bgr, detection)
+    feature = encode_aligned_face(aligned)
+    return aligned, feature
 
-    # --- DNN-BASED EMBEDDING (SFace - real face recognition) ---
-    if _SFACE_RECOGNIZER is not None:
-        # SFace expects 112x112 BGR input
-        aligned_face = cv2.resize(face_bgr, (112, 112))
-        # Run DNN inference to produce 128D identity embedding
-        feature = _SFACE_RECOGNIZER.feature(aligned_face)
-        embedding_vec = feature.flatten()
 
-        # L2-normalize to unit sphere
-        l2_norm = np.linalg.norm(embedding_vec)
-        if l2_norm > 0:
-            embedding_vec = embedding_vec / l2_norm
+def feature_to_list(feature: np.ndarray) -> List[float]:
+    """
+    L2-normalised 128 floats, for display and for the canonical hash.
 
-        embedding_list = [float(np.round(x, 6)) for x in embedding_vec]
-        # SFace produces 128D output
-        assert len(embedding_list) == 128, f"SFace embedding dimension error: expected 128, got {len(embedding_list)}"
-        return embedding_list
+    SFace.match() normalises internally for both metrics, so storing the unit
+    vector loses nothing and makes the stored record scale-independent.
+    """
+    vec = np.asarray(feature, dtype=np.float64).flatten()
+    norm = np.linalg.norm(vec)
+    if norm > 0:
+        vec = vec / norm
+    return [float(np.round(v, 6)) for v in vec]
 
-    # --- FALLBACK: Handcrafted features (when DNN model is not available) ---
-    face_resized = cv2.resize(face_bgr, (128, 128))
-    gray_face = cv2.cvtColor(face_resized, cv2.COLOR_BGR2GRAY)
-    gray_face = cv2.equalizeHist(gray_face)
 
-    # 1. Block-wise mean intensity (64 features)
-    blocks_8x8 = cv2.resize(gray_face, (8, 8), interpolation=cv2.INTER_AREA).flatten() / 255.0
+def list_to_feature(embedding: List[float]) -> np.ndarray:
+    """Rebuilds a 1x128 float32 feature from a stored embedding list."""
+    return np.asarray(embedding, dtype=np.float32).reshape(1, -1)
 
-    # 2. Horizontal and vertical spatial gradient features (32 features)
-    sobel_x = cv2.Sobel(gray_face, cv2.CV_64F, 1, 0, ksize=3)
-    sobel_y = cv2.Sobel(gray_face, cv2.CV_64F, 0, 1, ksize=3)
-    mag = np.sqrt(sobel_x**2 + sobel_y**2)
-    grad_features = cv2.resize(mag, (4, 8), interpolation=cv2.INTER_AREA).flatten()
-    if np.max(grad_features) > 0:
-        grad_features = grad_features / np.max(grad_features)
 
-    # 3. Color channel distribution & texture descriptors (32 features)
-    hsv_face = cv2.cvtColor(face_resized, cv2.COLOR_BGR2HSV)
-    h_hist = cv2.calcHist([hsv_face], [0], None, [16], [0, 180]).flatten()
-    s_hist = cv2.calcHist([hsv_face], [1], None, [16], [0, 256]).flatten()
-    color_features = np.concatenate([h_hist, s_hist])
-    if np.sum(color_features) > 0:
-        color_features = color_features / np.sum(color_features)
+# ─────────────────────────────────────────────────────────────────────────
+# Matching
+# ─────────────────────────────────────────────────────────────────────────
 
-    raw_embedding = np.concatenate([blocks_8x8, grad_features, color_features])
-    if len(raw_embedding) != 128:
-        raw_embedding = np.resize(raw_embedding, 128)
+def match_features(feature_a: np.ndarray, feature_b: np.ndarray) -> Tuple[float, float]:
+    """
+    Returns (cosine_similarity, l2_distance) using SFace's own match().
 
-    l2_norm = np.linalg.norm(raw_embedding)
-    if l2_norm > 0:
-        normalized_embedding = raw_embedding / l2_norm
-    else:
-        normalized_embedding = raw_embedding
+    Both metrics normalise internally, so they are two views of one decision
+    boundary rather than independent signals.
+    """
+    if _RECOGNIZER is None:
+        raise ModelUnavailable("SFace recognizer not available.")
+    a = np.asarray(feature_a, dtype=np.float32).reshape(1, -1)
+    b = np.asarray(feature_b, dtype=np.float32).reshape(1, -1)
+    cosine = float(_RECOGNIZER.match(a, b, _DIS_COSINE))
+    l2 = float(_RECOGNIZER.match(a, b, _DIS_NORM_L2))
+    return cosine, l2
 
-    embedding_list = [float(np.round(x, 6)) for x in normalized_embedding]
-    assert len(embedding_list) == 128, f"Embedding dimension error: expected 128, got {len(embedding_list)}"
-    return embedding_list
 
 def compute_euclidean_distance(embedding_a: List[float], embedding_b: List[float]) -> float:
-    """
-    Computes Euclidean distance between two 128D embedding vectors.
-    """
-    vec_a = np.array(embedding_a, dtype=np.float64)
-    vec_b = np.array(embedding_b, dtype=np.float64)
-    dist = float(np.linalg.norm(vec_a - vec_b))
-    return round(dist, 4)
+    """L2 distance between two stored embeddings, via SFace.match()."""
+    _, l2 = match_features(list_to_feature(embedding_a), list_to_feature(embedding_b))
+    return round(l2, 4)
+
 
 def compute_cosine_similarity(embedding_a: List[float], embedding_b: List[float]) -> float:
+    """Cosine similarity between two stored embeddings, via SFace.match()."""
+    cosine, _ = match_features(list_to_feature(embedding_a), list_to_feature(embedding_b))
+    return round(cosine, 4)
+
+
+def similarity_percentage(cosine: float) -> float:
     """
-    Computes Cosine Similarity between two 128D embedding vectors.
-    Range: [-1.0, 1.0], where 1.0 is an exact identity direction match.
+    Cosine mapped onto 0-100 with the decision threshold pinned at 50%.
+
+    Raw cosine x 100 was misleading: it made a genuine match at the 0.363
+    boundary read as '36%', which looks like a failure. Here anything at or
+    above the threshold reads >= 50%.
     """
-    vec_a = np.array(embedding_a, dtype=np.float64)
-    vec_b = np.array(embedding_b, dtype=np.float64)
-    
-    norm_a = np.linalg.norm(vec_a)
-    norm_b = np.linalg.norm(vec_b)
-    
-    if norm_a == 0 or norm_b == 0:
-        return 0.0
-        
-    cos_sim = float(np.dot(vec_a, vec_b) / (norm_a * norm_b))
-    return round(float(np.clip(cos_sim, -1.0, 1.0)), 4)
+    if cosine >= SFACE_COSINE_THRESHOLD:
+        span = 1.0 - SFACE_COSINE_THRESHOLD
+        pct = 50.0 + 50.0 * ((cosine - SFACE_COSINE_THRESHOLD) / span if span > 0 else 0.0)
+    else:
+        lo = -1.0
+        span = SFACE_COSINE_THRESHOLD - lo
+        pct = 50.0 * ((cosine - lo) / span if span > 0 else 0.0)
+    return round(max(0.0, min(100.0, pct)), 2)
+
 
 def evaluate_face_similarity(
     embedding_a: List[float],
     embedding_b: List[float],
-    threshold: float = 1.0
+    threshold: Optional[float] = None,
 ) -> Tuple[bool, float, float, float]:
     """
-    Evaluates face match verdict and metrics using SFace DNN embeddings.
-    For SFace L2-normalized embeddings:
-      - Same person: L2 dist ~0.3-0.8, cosine_sim ~0.7-0.95
-      - Different person: L2 dist ~1.0-1.5, cosine_sim ~-0.1-0.5
+    Match verdict for two stored embeddings.
+
+    `threshold` is an L2 distance, defaulting to SFace's published 1.128.
     Returns (is_match, similarity_percentage, euclidean_distance, cosine_similarity).
     """
-    euc_dist = compute_euclidean_distance(embedding_a, embedding_b)
-    cos_sim = compute_cosine_similarity(embedding_a, embedding_b)
+    l2_threshold = SFACE_L2_THRESHOLD if threshold is None else float(threshold)
 
-    # Similarity percentage based on cosine similarity (range: 0-100%)
-    # cosine_sim range for normalized vectors: [-1, 1]
-    # Map [0, 1] -> [0%, 100%], clamp negatives to 0%
-    sim_pct = max(0.0, min(100.0, cos_sim * 100.0))
-    sim_pct = round(sim_pct, 2)
+    cosine, l2 = match_features(list_to_feature(embedding_a), list_to_feature(embedding_b))
+    is_match = bool(l2 <= l2_threshold)
 
-    is_match = bool(euc_dist <= threshold)
+    return is_match, similarity_percentage(cosine), round(l2, 4), round(cosine, 4)
 
-    return is_match, sim_pct, euc_dist, cos_sim
+
+# ─────────────────────────────────────────────────────────────────────────
+# Convenience: image -> single best face embedding
+# ─────────────────────────────────────────────────────────────────────────
+
+def embed_primary_face(image_bgr: np.ndarray) -> Dict[str, Any]:
+    """
+    Detect, align and embed the largest face in an image.
+
+    The one entry point used by the comparison, registration and web-discovery
+    paths, so a live frame, an uploaded photo and a downloaded candidate image
+    all traverse exactly the same code.
+
+    Raises ValueError when no face is found - callers must not substitute a
+    whole-image embedding, which is not a face embedding at all.
+    """
+    detections, width, height = detect_faces_detailed(image_bgr)
+    if not detections:
+        raise ValueError("No face detected in the supplied image")
+
+    primary = detections[0]
+    aligned, feature = encode_face(image_bgr, primary)
+
+    return {
+        "detection": primary,
+        "detections": detections,
+        "aligned": aligned,
+        "feature": feature,
+        "embedding": feature_to_list(feature),
+        "display_crop": crop_face_region(image_bgr, primary.box),
+        "image_width": width,
+        "image_height": height,
+        "face_count": len(detections),
+    }
+
+
+def describe_pipeline(image_bgr: np.ndarray, result: Dict[str, Any], source: str) -> Dict[str, Any]:
+    """Per-run diagnostics, surfaced through the API so the UI can show real numbers."""
+    det: FaceDetection = result["detection"]
+    return {
+        "source": source,
+        "image_width": result["image_width"],
+        "image_height": result["image_height"],
+        "faces_detected": result["face_count"],
+        "selected_box": det.box,
+        "detection_score": round(det.score, 4),
+        "landmarks": det.landmarks,
+        "aligned_crop_size": [int(result["aligned"].shape[1]), int(result["aligned"].shape[0])],
+        "detector_model": MODEL_NAME_DETECTOR,
+        "recognizer_model": MODEL_NAME_RECOGNIZER,
+        "embedding_dimension": len(result["embedding"]),
+        "normalization": "L2 unit norm",
+    }

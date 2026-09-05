@@ -13,6 +13,7 @@ export function FaceComparisonView({ onNotify }: Props) {
   // Image A (Camera or Live Capture)
   const [imageA, setImageA] = useState<string | null>(null);
   const [faceABoxes, setFaceABoxes] = useState<FaceBox[]>([]);
+  const [dimsA, setDimsA] = useState({ width: 640, height: 480 });
   const [useCameraA, setUseCameraA] = useState<boolean>(true);
   const [isCameraActive, setIsCameraActive] = useState<boolean>(false);
   const [isMirroredA, setIsMirroredA] = useState<boolean>(true);
@@ -26,6 +27,7 @@ export function FaceComparisonView({ onNotify }: Props) {
   // Image B (Reference / Social Post Image)
   const [imageB, setImageB] = useState<string | null>(null);
   const [faceBBoxes, setFaceBBoxes] = useState<FaceBox[]>([]);
+  const [dimsB, setDimsB] = useState({ width: 640, height: 480 });
   const [statusMessageB, setStatusMessageB] = useState<string>('NO IMAGE');
   const [pixelStatsB, setPixelStatsB] = useState<PixelStats | undefined>(undefined);
   const [rgbCropB, setRgbCropB] = useState<string | undefined>(undefined);
@@ -33,7 +35,7 @@ export function FaceComparisonView({ onNotify }: Props) {
   const [eqCropB, setEqCropB] = useState<string | undefined>(undefined);
 
   // Pipeline execution & results
-  const [threshold, setThreshold] = useState<number>(1.0);
+  const [threshold, setThreshold] = useState<number>(1.128);
   const [autoRecord, setAutoRecord] = useState<boolean>(true);
   const [isComparing, setIsComparing] = useState<boolean>(false);
   const [result, setResult] = useState<CompareResponse | null>(null);
@@ -116,6 +118,7 @@ export function FaceComparisonView({ onNotify }: Props) {
         isSamplingRef.current = true;
         const detectRes = await detectFace(dataUrl);
         setFaceABoxes(detectRes.faces || []);
+        setDimsA({ width: detectRes.image_width || 640, height: detectRes.image_height || 480 });
         setStatusMessageA(detectRes.status_message || (detectRes.face_detected ? '1 FACE DETECTED' : 'SEARCHING...'));
         if (detectRes.pixel_stats) setPixelStatsA(detectRes.pixel_stats);
         if (detectRes.rgb_crop_base64) setRgbCropA(detectRes.rgb_crop_base64);
@@ -148,6 +151,7 @@ export function FaceComparisonView({ onNotify }: Props) {
     detectFace(dataUrl)
       .then((res) => {
         setFaceABoxes(res.faces || []);
+        setDimsA({ width: res.image_width || 640, height: res.image_height || 480 });
         setStatusMessageA('FRAME CAPTURED');
         if (res.pixel_stats) setPixelStatsA(res.pixel_stats);
         if (res.rgb_crop_base64) setRgbCropA(res.rgb_crop_base64);
@@ -175,6 +179,7 @@ export function FaceComparisonView({ onNotify }: Props) {
       try {
         const res = await detectFace(dataUrl);
         setFaceABoxes(res.faces || []);
+        setDimsA({ width: res.image_width || 640, height: res.image_height || 480 });
         setStatusMessageA(res.status_message || 'IMAGE A LOADED');
         if (res.pixel_stats) setPixelStatsA(res.pixel_stats);
         if (res.rgb_crop_base64) setRgbCropA(res.rgb_crop_base64);
@@ -198,6 +203,7 @@ export function FaceComparisonView({ onNotify }: Props) {
       try {
         const res = await detectFace(dataUrl);
         setFaceBBoxes(res.faces || []);
+        setDimsB({ width: res.image_width || 640, height: res.image_height || 480 });
         setStatusMessageB(res.status_message || 'REFERENCE IMAGE LOADED');
         if (res.pixel_stats) setPixelStatsB(res.pixel_stats);
         if (res.rgb_crop_base64) setRgbCropB(res.rgb_crop_base64);
@@ -258,10 +264,10 @@ export function FaceComparisonView({ onNotify }: Props) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '32px', width: '100%' }}>
-      
+
       {/* Top Banner / Pipeline Description */}
       <div style={{
-        background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.7) 0%, rgba(15, 23, 42, 0.9) 100%)',
+        background: 'linear-gradient(135deg, rgba(32, 36, 26, 0.70) 0%, var(--surface-raised) 100%)',
         border: '1px solid rgba(212, 175, 55, 0.2)',
         borderRadius: '16px',
         padding: '20px 24px',
@@ -278,17 +284,15 @@ export function FaceComparisonView({ onNotify }: Props) {
           gap: '16px',
         }}>
           <div>
-            <h3 style={{ margin: '0 0 6px 0', fontSize: '1.25rem', color: '#f8fafc', fontWeight: 700 }}>
-              ⚡ 1-to-1 Biometric Verification Engine
+            <h3 style={{ margin: '0 0 6px 0', fontSize: '1.25rem', color: '#f4f6f0' }}> 1-to-1 Biometric Verification Engine
             </h3>
-            <p style={{ margin: 0, color: '#94a3b8', fontSize: '0.875rem' }}>
-              Compare a <strong>Live Camera Face (A)</strong> with a <strong>Reference / Social Post Image (B)</strong>. Extracts normalized 128D embeddings, evaluates Euclidean & Cosine similarity metrics, and commits proof on-chain.
+            <p style={{ margin: 0, color: 'rgba(255,255,255,0.62)', fontSize: '0.875rem' }}> Compare a <strong>Live Camera Face (A)</strong> with a <strong>Reference / Social Post Image (B)</strong>. Extracts normalized 128D embeddings, evaluates Euclidean & Cosine similarity metrics, and commits proof on-chain.
             </p>
           </div>
 
           {/* Controls Toolbar */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8125rem', color: '#cbd5e1' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8125rem', color: 'rgba(255,255,255,0.78)' }}>
               <span>Threshold (Dist &le; {threshold.toFixed(2)}):</span>
               <input
                 type="range"
@@ -301,12 +305,12 @@ export function FaceComparisonView({ onNotify }: Props) {
               />
             </div>
 
-            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8125rem', color: '#cbd5e1', cursor: 'pointer' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8125rem', color: 'rgba(255,255,255,0.78)', cursor: 'pointer' }}>
               <input
                 type="checkbox"
                 checked={autoRecord}
                 onChange={(e) => setAutoRecord(e.target.checked)}
-                style={{ accentColor: '#10b981' }}
+                style={{ accentColor: '#7fd6a2' }}
               />
               <span>Auto-Commit Proof On-Chain</span>
             </label>
@@ -323,25 +327,18 @@ export function FaceComparisonView({ onNotify }: Props) {
           borderRadius: '10px',
           border: '1px solid rgba(255, 255, 255, 0.06)',
           fontSize: '0.75rem',
-          color: '#94a3b8',
+          color: 'rgba(255,255,255,0.62)',
           alignItems: 'center',
         }}>
-          <span style={{ fontWeight: 800, color: '#d4af37', letterSpacing: '0.05em' }}>PIPELINE:</span>
-          <span>① Image Ingestion</span>
-          <span style={{ color: '#475569' }}>→</span>
-          <span>② Face Detection</span>
-          <span style={{ color: '#475569' }}>→</span>
-          <span style={{ color: '#34d399', fontWeight: 700, background: 'rgba(16, 185, 129, 0.15)', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '2px 8px', borderRadius: '4px' }}>
-            ③ Grayscale & Equalization
+          <span style={{ fontWeight: 500, color: '#d4af37', letterSpacing: '0.05em' }}>PIPELINE:</span>
+          <span> Image Ingestion</span>
+          <span> Face Detection</span>
+          <span style={{ color: '#9ce0b8', fontWeight: 500, background: 'rgba(127, 214, 162, 0.14)', border: '1px solid rgba(127, 214, 162, 0.28)', padding: '2px 8px', borderRadius: '4px' }}> Grayscale & Equalization
           </span>
-          <span style={{ color: '#475569' }}>→</span>
-          <span>④ 128D Embedding</span>
-          <span style={{ color: '#475569' }}>→</span>
-          <span>⑤ Similarity Check</span>
-          <span style={{ color: '#475569' }}>→</span>
-          <span>⑥ SHA-256 Digest</span>
-          <span style={{ color: '#475569' }}>→</span>
-          <span style={{ color: '#10b981', fontWeight: 700 }}>⑦ Smart Contract Anchor</span>
+          <span> 128D Embedding</span>
+          <span> Similarity Check</span>
+          <span> SHA-256 Digest</span>
+          <span style={{ color: '#7fd6a2', fontWeight: 500 }}> Smart Contract Anchor</span>
         </div>
       </div>
 
@@ -351,11 +348,11 @@ export function FaceComparisonView({ onNotify }: Props) {
         gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))',
         gap: '24px',
       }}>
-        
+
         {/* PANEL A: LIVE CAMERA / INPUT A */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <div style={{
-            background: '#0f172a',
+            background: '#171a13',
             borderRadius: '20px',
             border: '1px solid rgba(255, 255, 255, 0.1)',
             padding: '20px',
@@ -371,14 +368,14 @@ export function FaceComparisonView({ onNotify }: Props) {
                   padding: '2px 8px',
                   borderRadius: '4px',
                   fontSize: '0.75rem',
-                  fontWeight: 800,
+                  fontWeight: 500,
                 }}>A</span>
                 <h4 style={{ margin: 0, fontSize: '1rem', color: '#ffffff' }}>Live Camera / Ingestion A</h4>
               </div>
 
               {/* Action buttons: Mirror Flip + Toggle Camera/Upload */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                
+
                 {useCameraA && (
                   <button
                     onClick={() => setIsMirroredA((prev) => !prev)}
@@ -386,18 +383,17 @@ export function FaceComparisonView({ onNotify }: Props) {
                     style={{
                       background: isMirroredA ? 'rgba(212, 175, 55, 0.18)' : 'rgba(255,255,255,0.08)',
                       border: `1px solid ${isMirroredA ? '#d4af37' : 'rgba(255,255,255,0.2)'}`,
-                      color: isMirroredA ? '#d4af37' : '#94a3b8',
+                      color: isMirroredA ? '#d4af37' : 'rgba(255,255,255,0.62)',
                       borderRadius: '6px',
                       padding: '4px 8px',
                       fontSize: '0.75rem',
-                      fontWeight: 600,
+                      fontWeight: 400,
                       cursor: 'pointer',
                       display: 'flex',
                       alignItems: 'center',
                       gap: '4px',
                     }}
                   >
-                    <span>🪞</span>
                     <span>{isMirroredA ? 'Mirrored' : 'Unmirrored'}</span>
                   </button>
                 )}
@@ -410,28 +406,26 @@ export function FaceComparisonView({ onNotify }: Props) {
                     }}
                     style={{
                       background: useCameraA ? '#d4af37' : 'transparent',
-                      color: useCameraA ? '#000000' : '#94a3b8',
+                      color: useCameraA ? '#000000' : 'rgba(255,255,255,0.62)',
                       border: 'none',
                       borderRadius: '4px',
                       padding: '4px 8px',
                       fontSize: '0.75rem',
-                      fontWeight: 600,
+                      fontWeight: 400,
                       cursor: 'pointer',
                     }}
-                  >
-                    📷 Live
+                  > Live
                   </button>
                   <label style={{
                     background: !useCameraA ? '#d4af37' : 'transparent',
-                    color: !useCameraA ? '#000000' : '#94a3b8',
+                    color: !useCameraA ? '#000000' : 'rgba(255,255,255,0.62)',
                     borderRadius: '4px',
                     padding: '4px 8px',
                     fontSize: '0.75rem',
-                    fontWeight: 600,
+                    fontWeight: 400,
                     cursor: 'pointer',
                     display: 'inline-block',
-                  }}>
-                    📁 Upload
+                  }}> Upload
                     <input type="file" accept="image/*" onChange={handleUploadA} style={{ display: 'none' }} />
                   </label>
                 </div>
@@ -443,7 +437,7 @@ export function FaceComparisonView({ onNotify }: Props) {
               position: 'relative',
               width: '100%',
               aspectRatio: '4/3',
-              background: '#020617',
+              background: '#12140f',
               borderRadius: '12px',
               overflow: 'hidden',
               border: '1px solid rgba(255,255,255,0.1)',
@@ -467,8 +461,9 @@ export function FaceComparisonView({ onNotify }: Props) {
                   />
                   <FaceOverlay
                     faces={faceABoxes}
-                    imageWidth={videoRef.current?.videoWidth || 640}
-                    imageHeight={videoRef.current?.videoHeight || 480}
+                    objectFit="cover"
+                    imageWidth={videoRef.current?.videoWidth || dimsA.width}
+                    imageHeight={videoRef.current?.videoHeight || dimsA.height}
                     isMirrored={isMirroredA}
                     color="#d4af37"
                   />
@@ -487,14 +482,15 @@ export function FaceComparisonView({ onNotify }: Props) {
                   />
                   <FaceOverlay
                     faces={faceABoxes}
-                    imageWidth={640}
-                    imageHeight={480}
+                    objectFit="contain"
+                    imageWidth={dimsA.width}
+                    imageHeight={dimsA.height}
                     isMirrored={useCameraA && isMirroredA}
                     color="#d4af37"
                   />
                 </>
               ) : (
-                <div style={{ color: '#64748b', fontSize: '0.875rem' }}>No image loaded</div>
+                <div style={{ color: 'rgba(255,255,255,0.44)', fontSize: '0.875rem' }}>No image loaded</div>
               )}
 
               {/* Status chip */}
@@ -513,7 +509,7 @@ export function FaceComparisonView({ onNotify }: Props) {
                 alignItems: 'center',
                 gap: '6px',
               }}>
-                <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: faceABoxes.length > 0 ? '#10b981' : '#f59e0b' }} />
+                <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: faceABoxes.length > 0 ? '#7fd6a2' : '#e8c46a' }} />
                 {statusMessageA}
               </div>
             </div>
@@ -531,11 +527,10 @@ export function FaceComparisonView({ onNotify }: Props) {
                       padding: '8px 16px',
                       borderRadius: '8px',
                       fontSize: '0.8125rem',
-                      fontWeight: 600,
+                      fontWeight: 400,
                       cursor: 'pointer',
                     }}
-                  >
-                    📸 Snapshot Frame A
+                  > Snapshot Frame A
                   </button>
                 ) : (
                   <button
@@ -544,15 +539,14 @@ export function FaceComparisonView({ onNotify }: Props) {
                       flex: 1,
                       background: 'rgba(255, 255, 255, 0.1)',
                       border: '1px solid rgba(255,255,255,0.2)',
-                      color: '#f8fafc',
+                      color: '#f4f6f0',
                       padding: '8px 16px',
                       borderRadius: '8px',
                       fontSize: '0.8125rem',
-                      fontWeight: 600,
+                      fontWeight: 400,
                       cursor: 'pointer',
                     }}
-                  >
-                    🔄 Resume Live Camera
+                  > Resume Live Camera
                   </button>
                 )}
               </div>
@@ -573,7 +567,7 @@ export function FaceComparisonView({ onNotify }: Props) {
         {/* PANEL B: REFERENCE / SOCIAL MEDIA POST IMAGE */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <div style={{
-            background: '#0f172a',
+            background: '#171a13',
             borderRadius: '20px',
             border: '1px solid rgba(255, 255, 255, 0.1)',
             padding: '20px',
@@ -584,26 +578,25 @@ export function FaceComparisonView({ onNotify }: Props) {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{
-                  background: '#38bdf8',
+                  background: '#d3e3bb',
                   color: '#000',
                   padding: '2px 8px',
                   borderRadius: '4px',
                   fontSize: '0.75rem',
-                  fontWeight: 800,
+                  fontWeight: 500,
                 }}>B</span>
                 <h4 style={{ margin: 0, fontSize: '1rem', color: '#ffffff' }}>Reference / Social Post Image (B)</h4>
               </div>
 
               <label style={{
-                background: '#38bdf8',
+                background: '#d3e3bb',
                 color: '#000000',
                 borderRadius: '6px',
                 padding: '4px 10px',
                 fontSize: '0.75rem',
-                fontWeight: 700,
+                fontWeight: 500,
                 cursor: 'pointer',
-              }}>
-                📁 Choose File
+              }}> Choose File
                 <input type="file" accept="image/*" onChange={handleUploadB} style={{ display: 'none' }} />
               </label>
             </div>
@@ -613,10 +606,10 @@ export function FaceComparisonView({ onNotify }: Props) {
               position: 'relative',
               width: '100%',
               aspectRatio: '4/3',
-              background: '#020617',
+              background: '#12140f',
               borderRadius: '12px',
               overflow: 'hidden',
-              border: '2px dashed rgba(56, 189, 248, 0.3)',
+              border: '2px dashed var(--rule-strong)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -626,10 +619,11 @@ export function FaceComparisonView({ onNotify }: Props) {
                   <img src={imageB} alt="Reference B" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
                   <FaceOverlay
                     faces={faceBBoxes}
-                    imageWidth={640}
-                    imageHeight={480}
+                    objectFit="contain"
+                    imageWidth={dimsB.width}
+                    imageHeight={dimsB.height}
                     isMirrored={false}
-                    color="#38bdf8"
+                    color="#d3e3bb"
                   />
                 </>
               ) : (
@@ -638,14 +632,13 @@ export function FaceComparisonView({ onNotify }: Props) {
                   flexDirection: 'column',
                   alignItems: 'center',
                   gap: '8px',
-                  color: '#64748b',
+                  color: 'rgba(255,255,255,0.44)',
                   cursor: 'pointer',
                   padding: '24px',
                   textAlign: 'center',
                 }}>
-                  <span style={{ fontSize: '2rem' }}>🖼️</span>
-                  <span style={{ fontSize: '0.875rem', color: '#94a3b8' }}>Upload social media post image / reference photo</span>
-                  <span style={{ fontSize: '0.75rem', color: '#64748b' }}>PNG, JPG, WebP supported</span>
+                  <span style={{ fontSize: '0.875rem', color: 'rgba(255,255,255,0.62)' }}>Upload social media post image / reference photo</span>
+                  <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.44)' }}>PNG, JPG, WebP supported</span>
                   <input type="file" accept="image/*" onChange={handleUploadB} style={{ display: 'none' }} />
                 </label>
               )}
@@ -662,19 +655,19 @@ export function FaceComparisonView({ onNotify }: Props) {
                   borderRadius: '12px',
                   fontSize: '0.75rem',
                   fontFamily: 'monospace',
-                  color: '#38bdf8',
+                  color: '#d3e3bb',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '6px',
                 }}>
-                  <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: faceBBoxes.length > 0 ? '#10b981' : '#ef4444' }} />
+                  <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: faceBBoxes.length > 0 ? '#7fd6a2' : '#e08585' }} />
                   {statusMessageB}
                 </div>
               )}
             </div>
 
-            <div style={{ fontSize: '0.75rem', color: '#64748b', textAlign: 'center' }}>
-              {imageB ? '✓ Reference image loaded and ready for comparison' : 'Select a reference face to compare against'}
+            <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.44)', textAlign: 'center' }}>
+              {imageB ? 'Reference image loaded and ready for comparison' : 'Select a reference face to compare against'}
             </div>
           </div>
 
@@ -685,7 +678,7 @@ export function FaceComparisonView({ onNotify }: Props) {
             rgbCropBase64={rgbCropB}
             grayscaleCropBase64={grayCropB}
             equalizedCropBase64={eqCropB}
-            accentColor="#38bdf8"
+            accentColor="#d3e3bb"
           />
         </div>
 
@@ -708,7 +701,7 @@ export function FaceComparisonView({ onNotify }: Props) {
             padding: '18px 48px',
             borderRadius: '12px',
             fontSize: '1.25rem',
-            fontWeight: 800,
+            fontWeight: 500,
             cursor: isComparing || !imageB ? 'not-allowed' : 'pointer',
             boxShadow: '0 8px 24px rgba(212, 175, 55, 0.3)',
             display: 'flex',
@@ -732,7 +725,6 @@ export function FaceComparisonView({ onNotify }: Props) {
             </>
           ) : (
             <>
-              <span>🔍</span>
               <span>Compare Embeddings & Verify Proof</span>
             </>
           )}
@@ -742,18 +734,18 @@ export function FaceComparisonView({ onNotify }: Props) {
       {/* VERIFICATION RESULTS PANEL */}
       {result && (
         <div style={{
-          background: '#0f172a',
+          background: '#171a13',
           borderRadius: '24px',
-          border: `2px solid ${result.is_match ? '#10b981' : '#ef4444'}`,
+          border: `2px solid ${result.is_match ? '#7fd6a2' : '#e08585'}`,
           padding: '32px',
           display: 'flex',
           flexDirection: 'column',
           gap: '24px',
           boxShadow: result.is_match
-            ? '0 12px 36px rgba(16, 185, 129, 0.2)'
-            : '0 12px 36px rgba(239, 68, 68, 0.2)',
+            ? '0 12px 36px rgba(127, 214, 162, 0.16)'
+            : '0 12px 36px rgba(224, 133, 133, 0.18)',
         }}>
-          
+
           {/* Header Verdict Badge & Similarity Score */}
           <div style={{
             display: 'flex',
@@ -771,29 +763,28 @@ export function FaceComparisonView({ onNotify }: Props) {
                 gap: '8px',
                 padding: '8px 16px',
                 borderRadius: '8px',
-                background: result.is_match ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-                border: `1px solid ${result.is_match ? '#10b981' : '#ef4444'}`,
-                color: result.is_match ? '#34d399' : '#f87171',
-                fontWeight: 800,
+                background: result.is_match ? 'rgba(127, 214, 162, 0.14)' : 'rgba(224, 133, 133, 0.14)',
+                border: `1px solid ${result.is_match ? '#7fd6a2' : '#e08585'}`,
+                color: result.is_match ? '#9ce0b8' : '#e89a9a',
+                fontWeight: 500,
                 fontSize: '1.25rem',
               }}>
-                <span>{result.is_match ? '✓' : '✗'}</span>
+                <span>{result.is_match ? '' : ''}</span>
                 <span>{result.is_match ? 'IDENTITY MATCH VERIFIED' : 'IDENTITY MISMATCH'}</span>
               </div>
-              <p style={{ margin: '8px 0 0 0', color: '#94a3b8', fontSize: '0.875rem' }}>
+              <p style={{ margin: '8px 0 0 0', color: 'rgba(255,255,255,0.62)', fontSize: '0.875rem' }}>
                 {result.status_message}
               </p>
             </div>
 
             {/* Similarity Score Meter */}
             <div style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: '0.8125rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                Biometric Similarity
+              <div style={{ fontSize: '0.8125rem', color: 'rgba(255,255,255,0.62)', textTransform: 'uppercase', letterSpacing: '0.05em' }}> Biometric Similarity
               </div>
               <div style={{
                 fontSize: '2.5rem',
                 fontWeight: 900,
-                color: result.is_match ? '#34d399' : '#f87171',
+                color: result.is_match ? '#9ce0b8' : '#e89a9a',
                 lineHeight: 1.1,
               }}>
                 {result.similarity_percentage.toFixed(1)}%
@@ -808,42 +799,36 @@ export function FaceComparisonView({ onNotify }: Props) {
             gap: '16px',
           }}>
             <div style={{ background: 'rgba(0,0,0,0.3)', padding: '16px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
-              <div style={{ fontSize: '0.75rem', color: '#64748b' }}>EUCLIDEAN DISTANCE (L2)</div>
-              <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#f8fafc', marginTop: '4px' }}>
+              <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.44)' }}>EUCLIDEAN DISTANCE (L2)</div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 500, color: '#f4f6f0', marginTop: '4px' }}>
                 {result.euclidean_distance.toFixed(4)}
               </div>
-              <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '2px' }}>
-                Threshold: &le; {result.threshold_used.toFixed(2)}
+              <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.62)', marginTop: '2px' }}> Threshold: &le; {result.threshold_used.toFixed(2)}
               </div>
             </div>
 
             <div style={{ background: 'rgba(0,0,0,0.3)', padding: '16px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
-              <div style={{ fontSize: '0.75rem', color: '#64748b' }}>COSINE SIMILARITY</div>
-              <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#f8fafc', marginTop: '4px' }}>
+              <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.44)' }}>COSINE SIMILARITY</div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 500, color: '#f4f6f0', marginTop: '4px' }}>
                 {result.cosine_similarity.toFixed(4)}
               </div>
-              <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '2px' }}>
-                Range: [-1.0, 1.0]
+              <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.62)', marginTop: '2px' }}> Range: [-1.0, 1.0]
               </div>
             </div>
 
             <div style={{ background: 'rgba(0,0,0,0.3)', padding: '16px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
-              <div style={{ fontSize: '0.75rem', color: '#64748b' }}>VECTOR DIMENSIONS</div>
-              <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#f8fafc', marginTop: '4px' }}>
-                128D &times; 2
+              <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.44)' }}>VECTOR DIMENSIONS</div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 500, color: '#f4f6f0', marginTop: '4px' }}> 128D &times; 2
               </div>
-              <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '2px' }}>
-                Normalized Unit Sphere
+              <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.62)', marginTop: '2px' }}> Normalized Unit Sphere
               </div>
             </div>
 
             <div style={{ background: 'rgba(0,0,0,0.3)', padding: '16px', borderRadius: '12px', border: '1px solid rgba(16,185,129,0.2)' }}>
-              <div style={{ fontSize: '0.75rem', color: '#34d399' }}>GRAYSCALE PRE-PROCESSING</div>
-              <div style={{ fontSize: '1.125rem', fontWeight: 700, color: '#a7f3d0', marginTop: '6px' }}>
-                ✓ 8-Bit Gray + Equalized
+              <div style={{ fontSize: '0.75rem', color: '#9ce0b8' }}>GRAYSCALE PRE-PROCESSING</div>
+              <div style={{ fontSize: '1.125rem', fontWeight: 500, color: '#c3ead4', marginTop: '6px' }}> 8-Bit Gray + Equalized
               </div>
-              <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '2px' }}>
-                cv2.COLOR_BGR2GRAY + equalizeHist
+              <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.62)', marginTop: '2px' }}> cv2.COLOR_BGR2GRAY + equalizeHist
               </div>
             </div>
           </div>
@@ -851,11 +836,11 @@ export function FaceComparisonView({ onNotify }: Props) {
           {/* 128D Embedding Numerical Heatmap Preview */}
           {result.embedding_a.length > 0 && result.embedding_b.length > 0 && (
             <div style={{ background: 'rgba(0,0,0,0.4)', borderRadius: '12px', padding: '16px', border: '1px solid rgba(255,255,255,0.05)' }}>
-              <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: '#cbd5e1', marginBottom: '10px', display: 'flex', justifyContent: 'space-between' }}>
+              <div style={{ fontSize: '0.8125rem', fontWeight: 400, color: 'rgba(255,255,255,0.78)', marginBottom: '10px', display: 'flex', justifyContent: 'space-between' }}>
                 <span>128-Dimensional Vector Representation Heatmaps</span>
-                <span style={{ fontSize: '0.75rem', color: '#64748b' }}>Vector A (Top) vs Vector B (Bottom)</span>
+                <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.44)' }}>Vector A (Top) vs Vector B (Bottom)</span>
               </div>
-              
+
               {/* Embedding A Spectrum */}
               <div style={{ display: 'flex', height: '14px', borderRadius: '4px', overflow: 'hidden', marginBottom: '4px' }}>
                 {result.embedding_a.map((val, idx) => {
@@ -903,26 +888,25 @@ export function FaceComparisonView({ onNotify }: Props) {
             gap: '8px',
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '0.75rem', color: '#d4af37', fontWeight: 700, letterSpacing: '0.05em' }}>
-                CANONICAL VERIFICATION RECORD (SHA-256)
+              <span style={{ fontSize: '0.75rem', color: '#d4af37', fontWeight: 500, letterSpacing: '0.05em' }}> CANONICAL VERIFICATION RECORD (SHA-256)
               </span>
               <button
                 onClick={() => copyToClipboard(result.record_hash, 'hash')}
                 style={{
                   background: 'transparent',
                   border: 'none',
-                  color: '#94a3b8',
+                  color: 'rgba(255,255,255,0.62)',
                   fontSize: '0.75rem',
                   cursor: 'pointer',
                 }}
               >
-                {copiedHash === 'hash' ? '✓ Copied' : '📋 Copy Hash'}
+                {copiedHash === 'hash' ? 'Copied' : 'Copy Hash'}
               </button>
             </div>
             <code style={{
               fontFamily: 'monospace',
               fontSize: '0.8125rem',
-              color: '#38bdf8',
+              color: '#d3e3bb',
               wordBreak: 'break-all',
               background: 'rgba(0,0,0,0.3)',
               padding: '8px 12px',
@@ -935,8 +919,8 @@ export function FaceComparisonView({ onNotify }: Props) {
           {/* Blockchain On-Chain Anchor Card */}
           {result.blockchain_result && (
             <div style={{
-              background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(6, 78, 59, 0.15) 100%)',
-              border: '1px solid rgba(16, 185, 129, 0.3)',
+              background: 'linear-gradient(135deg, rgba(127, 214, 162, 0.08) 0%, rgba(127, 214, 162, 0.12) 100%)',
+              border: '1px solid rgba(127, 214, 162, 0.28)',
               borderRadius: '16px',
               padding: '20px',
               display: 'flex',
@@ -944,16 +928,15 @@ export function FaceComparisonView({ onNotify }: Props) {
               gap: '12px',
             }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '0.875rem', fontWeight: 800, color: '#34d399', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span>⛓️</span> EVM Smart Contract Confirmation
+                <span style={{ fontSize: '0.875rem', fontWeight: 500, color: '#9ce0b8', display: 'flex', alignItems: 'center', gap: '6px' }}> EVM Smart Contract Confirmation
                 </span>
                 <span style={{
-                  background: '#10b981',
+                  background: '#7fd6a2',
                   color: '#000000',
                   padding: '2px 8px',
                   borderRadius: '4px',
                   fontSize: '0.75rem',
-                  fontWeight: 700,
+                  fontWeight: 500,
                   textTransform: 'uppercase',
                 }}>
                   {result.blockchain_result.status}
@@ -962,20 +945,20 @@ export function FaceComparisonView({ onNotify }: Props) {
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '12px', fontSize: '0.8125rem' }}>
                 <div>
-                  <span style={{ color: '#64748b' }}>Transaction Hash: </span>
-                  <code style={{ color: '#a7f3d0', wordBreak: 'break-all' }}>{result.blockchain_result.transaction_hash}</code>
+                  <span style={{ color: 'rgba(255,255,255,0.44)' }}>Transaction Hash: </span>
+                  <code style={{ color: '#c3ead4', wordBreak: 'break-all' }}>{result.blockchain_result.transaction_hash}</code>
                 </div>
                 <div>
-                  <span style={{ color: '#64748b' }}>Network: </span>
+                  <span style={{ color: 'rgba(255,255,255,0.44)' }}>Network: </span>
                   <span style={{ color: '#ffffff' }}>{result.blockchain_result.network}</span>
                 </div>
                 <div>
-                  <span style={{ color: '#64748b' }}>Block Number: </span>
+                  <span style={{ color: 'rgba(255,255,255,0.44)' }}>Block Number: </span>
                   <span style={{ color: '#ffffff' }}>#{result.blockchain_result.block_number || '1048291'}</span>
                 </div>
                 <div>
-                  <span style={{ color: '#64748b' }}>Timestamp: </span>
-                  <span style={{ color: '#94a3b8' }}>{result.blockchain_result.timestamp}</span>
+                  <span style={{ color: 'rgba(255,255,255,0.44)' }}>Timestamp: </span>
+                  <span style={{ color: 'rgba(255,255,255,0.62)' }}>{result.blockchain_result.timestamp}</span>
                 </div>
               </div>
             </div>

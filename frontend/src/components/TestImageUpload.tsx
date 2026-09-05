@@ -61,10 +61,10 @@ export const TestImageUpload: React.FC<TestImageUploadProps> = ({
       <div
         onClick={() => !selectedImage && fileInputRef.current?.click()}
         style={{
-          border: '2px dashed rgba(56, 189, 248, 0.4)',
+          border: '2px dashed rgba(211, 227, 187, 0.35)',
           borderRadius: '12px',
           padding: '16px',
-          background: 'rgba(15, 23, 42, 0.6)',
+          background: 'var(--surface-sunken)',
           minHeight: '380px',
           display: 'flex',
           flexDirection: 'column',
@@ -105,6 +105,7 @@ export const TestImageUpload: React.FC<TestImageUploadProps> = ({
             />
 
             <FaceOverlay
+              objectFit="contain"
               faces={faces}
               imageWidth={imageWidth}
               imageHeight={imageHeight}
@@ -123,17 +124,16 @@ export const TestImageUpload: React.FC<TestImageUploadProps> = ({
                 position: 'absolute',
                 top: '12px',
                 right: '12px',
-                background: 'rgba(2, 6, 23, 0.85)',
+                background: 'rgba(14, 16, 12, 0.85)',
                 border: '1px solid rgba(255, 255, 255, 0.2)',
-                color: '#38bdf8',
+                color: '#d3e3bb',
                 padding: '6px 12px',
                 borderRadius: '6px',
                 fontSize: '0.75rem',
-                fontWeight: 600,
+                fontWeight: 400,
                 cursor: 'pointer',
               }}
-            >
-              🔄 Change Image
+            > Change Image
             </button>
           </div>
         ) : (
@@ -141,12 +141,9 @@ export const TestImageUpload: React.FC<TestImageUploadProps> = ({
             onClick={() => fileInputRef.current?.click()}
             style={{ cursor: 'pointer', padding: '32px' }}
           >
-            <div style={{ fontSize: '2.5rem', marginBottom: '8px' }}>📁</div>
-            <div style={{ color: '#38bdf8', fontWeight: 700, fontSize: '1rem', marginBottom: '6px' }}>
-              Click to Upload Test Image
+            <div style={{ color: '#d3e3bb', fontWeight: 500, fontSize: '1rem', marginBottom: '6px' }}> Click to Upload Test Image
             </div>
-            <div style={{ color: '#64748b', fontSize: '0.8125rem', maxWidth: '360px' }}>
-              Upload a JPG or PNG containing a human face to test detection, 128D embedding extraction, and blockchain hashing.
+            <div style={{ color: 'rgba(255,255,255,0.44)', fontSize: '0.8125rem', maxWidth: '360px' }}> Upload a JPG or PNG containing a human face to test detection, 128D embedding extraction, and blockchain hashing.
             </div>
           </div>
         )}
