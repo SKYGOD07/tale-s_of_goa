@@ -339,8 +339,52 @@ export interface PipelineMetrics {
   is_match: boolean;
 }
 
+/** One candidate the search considered, with its real biometric score. */
+export interface CandidateReport {
+  page_url: string;
+  image_url: string;
+  title?: string;
+  author?: string;
+  platform?: string;
+  source?: string;
+  faces_found: number;
+  cosine_similarity?: number | null;
+  euclidean_distance?: number | null;
+  similarity_percentage?: number | null;
+  is_match: boolean;
+  error?: string | null;
+}
+
+export interface SearchDiagnostics {
+  mechanisms: string[];
+  capabilities: {
+    reverse_image_search?: string | null;
+    reverse_image_available: boolean;
+    live_search_available: boolean;
+    live_search_engine?: string | null;
+    mode: string;
+  };
+  candidates_considered: number;
+  candidates_verified: number;
+  threshold_l2?: number;
+  candidate_report: CandidateReport[];
+}
+
+/** Recomputes the fingerprint and compares it with what the chain holds. */
+export interface TamperCheck {
+  recomputed_hash: string;
+  stored_hash: string;
+  hashes_identical: boolean;
+  found_on_chain: boolean;
+  simulated: boolean;
+  verdict: 'VERIFIED' | 'UNVERIFIED' | 'TAMPERED';
+}
+
 export interface SocialSearchPipelineResponse {
   success: boolean;
+  /** False when the search genuinely found nothing. Not an error. */
+  match_found?: boolean;
+  message?: string;
   pipeline_stage: string;
   input_face: {
     crop_base64?: string;
@@ -353,13 +397,18 @@ export interface SocialSearchPipelineResponse {
   canonical_record: any;
   blockchain_upload: VerificationResponse;
   onchain_reverification: VerificationQueryResponse;
+  tamper_check?: TamperCheck;
+  diagnostics?: {
+    input_scan?: Record<string, any>;
+    search?: SearchDiagnostics;
+  };
   error?: string;
 }
 
 export async function runSocialSearchPipeline(
   imageBase64: string,
   query: string = '',
-  threshold: number = 1.0
+  threshold: number = 1.128
 ): Promise<SocialSearchPipelineResponse> {
   try {
     const res = await fetch(`${API_BASE_URL}/api/social/search-and-verify`, {
@@ -377,7 +426,21 @@ export async function runSocialSearchPipeline(
       throw new Error(errText || `Server error ${res.status}`);
     }
 
-    return await res.json();
+    const data = await res.json();
+    if (data && data.match_found === false) {
+      return {
+        ...data,
+        input_face: data.input_face ?? { image_width: 0, image_height: 0 },
+        discovered_post: data.discovered_post ?? {
+          url: '', platform: '', author: '', title: '', description: '', image_url: '',
+        },
+        metrics: data.metrics ?? {
+          similarity_percentage: 0, euclidean_distance: 0, cosine_similarity: 0, is_match: false,
+        },
+        record_hash: data.record_hash ?? '',
+      };
+    }
+    return data;
   } catch (err: any) {
     return {
       success: false,
