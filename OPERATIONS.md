@@ -460,11 +460,14 @@ Put your own photos here (gitignored):
 ```
 backend/tests/fixtures/
 ├── same_person/
-│   ├── 01_you_older.jpg        two DIFFERENT photos of the SAME person
-│   └── 02_you_recent.jpg
+│   ├── 01_you_2025-05-23.jpg    two DIFFERENT photos of the SAME person
+│   └── 02_you_2026-09-05.jpg    (different day / lighting / angle is ideal)
 └── different_person/
     ├── 01_you.jpg
-    └── 02_other_person.jpg     a clearly different person
+    └── 02_other_person.jpg      a clearly different person
+
+The runner picks up whatever two images it finds in each folder, sorted by
+name, so the exact filenames do not matter.
 ```
 
 ```powershell
@@ -557,7 +560,7 @@ cd "..\backend"
 
 # 4. Prove the search is genuine, not hardcoded:
 #    your face + someone else's name must be REJECTED
-.\.venv\Scripts\python.exe run_pipeline.py --image "tests\fixtures\same_person\02_you_recent.jpg" --query "Bill Gates"
+.\.venv\Scripts\python.exe run_pipeline.py --image "tests\fixtures\same_person\02_you_2026-09-05.jpg" --query "Bill Gates"
 
 # 5. Tamper evidence, end to end
 .\.venv\Scripts\python.exe verify_chain.py demo
