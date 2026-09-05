@@ -60,7 +60,30 @@ export interface VerificationResponse {
   status: string;
   timestamp: string;
   block_number?: number;
+  /** True when the proof was generated locally and never broadcast. */
+  simulated?: boolean;
+  chain_id?: number;
+  explorer_url?: string | null;
+  gas_used?: number;
   error?: string;
+}
+
+export interface ChainStatus {
+  chain_id: number;
+  network: string;
+  rpc_url: string;
+  contract_address?: string | null;
+  explorer_url?: string | null;
+  /** Contract address and signing key are both present. */
+  configured: boolean;
+  /** The RPC endpoint answered. */
+  connected: boolean;
+  /** Connected, configured, and the signing account holds gas. */
+  live: boolean;
+  account?: string | null;
+  balance_eth?: number | null;
+  block_number?: number | null;
+  message: string;
 }
 
 export interface CompareResponse {
@@ -98,6 +121,9 @@ export interface VerificationQueryResponse {
   timestamp_iso?: string;
   recorder?: string;
   network: string;
+  chain_id?: number;
+  simulated?: boolean;
+  explorer_url?: string | null;
   error?: string;
 }
 
@@ -404,3 +430,16 @@ export async function fetchSocialPost(url: string): Promise<any> {
   return await res.json();
 }
 
+
+/**
+ * Reads which chain the backend is pointed at and whether it can actually
+ * broadcast. Drives the network badge in the masthead and the simulated-mode
+ * notice, so the UI never presents a dry run as a confirmed on-chain proof.
+ */
+export async function getChainStatus(): Promise<ChainStatus> {
+  const res = await fetch(`${API_BASE_URL}/api/verification/status`);
+  if (!res.ok) {
+    throw new Error(`Chain status unavailable (${res.status})`);
+  }
+  return await res.json();
+}
