@@ -53,6 +53,31 @@ flowchart TD
 
 ## 🚀 Quick Start Guide
 
+### Step 0: Install dependencies
+
+Each directory has its own toolchain — see **[SETUP.md](SETUP.md)** for the full
+walkthrough, including Ethereum Sepolia testnet configuration.
+
+```powershell
+# Backend  — Python, NOT npm
+cd backend
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+
+# Blockchain
+cd ..lockchain
+npm install
+
+# Frontend
+cd ..rontend
+npm install
+```
+
+> `backend/` has no `package.json`. `npm install` there will fail with
+> `ENOENT` — use `pip` in the virtualenv as shown above.
+
+---
+
 ### Step 1: Start the Local Blockchain (Terminal 1)
 ```bash
 cd blockchain
@@ -120,9 +145,9 @@ python run_pipeline.py --query "Linus Torvalds"
 You can also run and record the pipeline using the Next.js interactive interface:
 
 #### 1. Start FastAPI Backend (Terminal 2):
-```bash
+```powershell
 cd backend
-python run.py
+.\.venv\Scripts\python.exe run.py
 ```
 *API available at `http://localhost:8000` (Swagger docs at `http://localhost:8000/docs`).*
 
