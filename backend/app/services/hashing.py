@@ -6,7 +6,7 @@ from typing import List, Tuple, Dict, Any, Optional
 def create_biometric_record(
     embedding: List[float],
     dimension: int = 128,
-    model_name: str = "128d_face_encoder"
+    model_name: str = "SFace(face_recognition_sface_2021dec.onnx)+YuNet(face_detection_yunet_2023mar.onnx)"
 ) -> Dict[str, Any]:
     """
     Creates a canonical structured single-face biometric record.
@@ -28,7 +28,7 @@ def create_comparison_record(
     cosine_similarity: float,
     is_match: bool,
     threshold: float,
-    model_name: str = "128d_face_encoder"
+    model_name: str = "SFace(face_recognition_sface_2021dec.onnx)+YuNet(face_detection_yunet_2023mar.onnx)"
 ) -> Dict[str, Any]:
     """
     Creates a canonical structured 1-to-1 face verification comparison record.
