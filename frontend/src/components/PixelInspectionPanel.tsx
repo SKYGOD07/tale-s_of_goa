@@ -18,14 +18,14 @@ export const PixelInspectionPanel: React.FC<Props> = ({
   rgbCropBase64,
   grayscaleCropBase64,
   equalizedCropBase64,
-  accentColor = '#38bdf8',
+  accentColor = '#d3e3bb',
 }) => {
   const [activeTab, setActiveTab] = useState<'transforms' | 'pixels' | 'code'>('transforms');
 
   return (
     <div
       style={{
-        background: '#0a0f1d',
+        background: '#14170f',
         border: `1px solid ${accentColor}33`,
         borderRadius: '16px',
         padding: '20px',
@@ -46,8 +46,7 @@ export const PixelInspectionPanel: React.FC<Props> = ({
         paddingBottom: '14px',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ fontSize: '1.25rem' }}>🔬</span>
-          <h4 style={{ margin: 0, fontSize: '1rem', color: '#f8fafc', fontWeight: 700 }}>
+          <h4 style={{ margin: 0, fontSize: '1rem', color: '#f4f6f0' }}>
             {title}
           </h4>
         </div>
@@ -65,48 +64,45 @@ export const PixelInspectionPanel: React.FC<Props> = ({
             onClick={() => setActiveTab('transforms')}
             style={{
               background: activeTab === 'transforms' ? accentColor : 'transparent',
-              color: activeTab === 'transforms' ? '#000000' : '#94a3b8',
+              color: activeTab === 'transforms' ? '#000000' : 'rgba(255,255,255,0.62)',
               border: 'none',
               borderRadius: '6px',
               padding: '4px 10px',
               fontSize: '0.75rem',
-              fontWeight: 700,
+              fontWeight: 500,
               cursor: 'pointer',
             }}
-          >
-            🖼️ Grayscale & Transforms
+          > Grayscale & Transforms
           </button>
 
           <button
             onClick={() => setActiveTab('pixels')}
             style={{
               background: activeTab === 'pixels' ? accentColor : 'transparent',
-              color: activeTab === 'pixels' ? '#000000' : '#94a3b8',
+              color: activeTab === 'pixels' ? '#000000' : 'rgba(255,255,255,0.62)',
               border: 'none',
               borderRadius: '6px',
               padding: '4px 10px',
               fontSize: '0.75rem',
-              fontWeight: 700,
+              fontWeight: 500,
               cursor: 'pointer',
             }}
-          >
-            📊 RGB/BGR Pixel Data
+          > RGB/BGR Pixel Data
           </button>
 
           <button
             onClick={() => setActiveTab('code')}
             style={{
               background: activeTab === 'code' ? accentColor : 'transparent',
-              color: activeTab === 'code' ? '#000000' : '#94a3b8',
+              color: activeTab === 'code' ? '#000000' : 'rgba(255,255,255,0.62)',
               border: 'none',
               borderRadius: '6px',
               padding: '4px 10px',
               fontSize: '0.75rem',
-              fontWeight: 700,
+              fontWeight: 500,
               cursor: 'pointer',
             }}
-          >
-            💻 OpenCV Code
+          > OpenCV Code
           </button>
         </div>
       </div>
@@ -119,10 +115,10 @@ export const PixelInspectionPanel: React.FC<Props> = ({
             gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
             gap: '14px',
           }}>
-            
+
             {/* Step 1: RGB Crop */}
             <div style={{
-              background: '#020617',
+              background: '#12140f',
               border: '1px solid rgba(255,255,255,0.1)',
               borderRadius: '10px',
               padding: '10px',
@@ -132,21 +128,21 @@ export const PixelInspectionPanel: React.FC<Props> = ({
               gap: '8px',
               textAlign: 'center',
             }}>
-              <span style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#38bdf8' }}>1. ORIGINAL RGB CROP</span>
+              <span style={{ fontSize: '0.6875rem', fontWeight: 500, color: '#d3e3bb' }}>1. ORIGINAL RGB CROP</span>
               <div style={{ width: '80px', height: '80px', borderRadius: '8px', overflow: 'hidden', background: '#000', border: '1px solid rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 {rgbCropBase64 ? (
                   <img src={rgbCropBase64} alt="RGB Crop" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                 ) : (
-                  <span style={{ color: '#475569', fontSize: '0.6875rem' }}>Waiting crop</span>
+                  <span style={{ color: '#3c4234', fontSize: '0.6875rem' }}>Waiting crop</span>
                 )}
               </div>
-              <span style={{ fontSize: '0.625rem', color: '#64748b' }}>RGB 3-Channel Color</span>
+              <span style={{ fontSize: '0.625rem', color: 'rgba(255,255,255,0.44)' }}>RGB 3-Channel Color</span>
             </div>
 
             {/* Step 2: 8-bit Grayscale */}
             <div style={{
-              background: '#020617',
-              border: '1px solid #34d399',
+              background: '#12140f',
+              border: '1px solid #9ce0b8',
               borderRadius: '10px',
               padding: '10px',
               display: 'flex',
@@ -155,20 +151,20 @@ export const PixelInspectionPanel: React.FC<Props> = ({
               gap: '8px',
               textAlign: 'center',
             }}>
-              <span style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#34d399' }}>2. 8-BIT GRAYSCALE</span>
-              <div style={{ width: '80px', height: '80px', borderRadius: '8px', overflow: 'hidden', background: '#000', border: '1px solid #34d39966', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <span style={{ fontSize: '0.6875rem', fontWeight: 500, color: '#9ce0b8' }}>2. 8-BIT GRAYSCALE</span>
+              <div style={{ width: '80px', height: '80px', borderRadius: '8px', overflow: 'hidden', background: '#000', border: '1px solid #9ce0b866', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 {grayscaleCropBase64 ? (
                   <img src={grayscaleCropBase64} alt="Grayscale Crop" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                 ) : (
-                  <span style={{ color: '#475569', fontSize: '0.6875rem' }}>Waiting crop</span>
+                  <span style={{ color: '#3c4234', fontSize: '0.6875rem' }}>Waiting crop</span>
                 )}
               </div>
-              <span style={{ fontSize: '0.625rem', color: '#a7f3d0' }}>cv2.COLOR_BGR2GRAY</span>
+              <span style={{ fontSize: '0.625rem', color: '#c3ead4' }}>cv2.COLOR_BGR2GRAY</span>
             </div>
 
             {/* Step 3: Histogram Equalized */}
             <div style={{
-              background: '#020617',
+              background: '#12140f',
               border: '1px solid #d4af37',
               borderRadius: '10px',
               padding: '10px',
@@ -178,20 +174,20 @@ export const PixelInspectionPanel: React.FC<Props> = ({
               gap: '8px',
               textAlign: 'center',
             }}>
-              <span style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#d4af37' }}>3. HIST EQUALIZED</span>
+              <span style={{ fontSize: '0.6875rem', fontWeight: 500, color: '#d4af37' }}>3. HIST EQUALIZED</span>
               <div style={{ width: '80px', height: '80px', borderRadius: '8px', overflow: 'hidden', background: '#000', border: '1px solid #d4af3766', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 {equalizedCropBase64 ? (
                   <img src={equalizedCropBase64} alt="Equalized Crop" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                 ) : (
-                  <span style={{ color: '#475569', fontSize: '0.6875rem' }}>Waiting crop</span>
+                  <span style={{ color: '#3c4234', fontSize: '0.6875rem' }}>Waiting crop</span>
                 )}
               </div>
-              <span style={{ fontSize: '0.625rem', color: '#fde047' }}>cv2.equalizeHist()</span>
+              <span style={{ fontSize: '0.625rem', color: '#f0dc96' }}>cv2.equalizeHist()</span>
             </div>
 
             {/* Step 4: 128x128 Standardization */}
             <div style={{
-              background: '#020617',
+              background: '#12140f',
               border: '1px solid rgba(168, 85, 247, 0.4)',
               borderRadius: '10px',
               padding: '10px',
@@ -201,12 +197,12 @@ export const PixelInspectionPanel: React.FC<Props> = ({
               gap: '8px',
               textAlign: 'center',
             }}>
-              <span style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#c084fc' }}>4. 128D VECTOR</span>
-              <div style={{ width: '80px', height: '80px', borderRadius: '8px', overflow: 'hidden', background: '#000', border: '1px solid #a855f766', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
-                <span style={{ fontSize: '1rem', color: '#c084fc' }}>128D</span>
-                <span style={{ fontSize: '0.625rem', color: '#94a3b8' }}>Norm L2</span>
+              <span style={{ fontSize: '0.6875rem', fontWeight: 500, color: '#d9c9a4' }}>4. 128D VECTOR</span>
+              <div style={{ width: '80px', height: '80px', borderRadius: '8px', overflow: 'hidden', background: '#000', border: '1px solid #c0a97a66', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
+                <span style={{ fontSize: '1rem', color: '#d9c9a4' }}>128D</span>
+                <span style={{ fontSize: '0.625rem', color: 'rgba(255,255,255,0.62)' }}>Norm L2</span>
               </div>
-              <span style={{ fontSize: '0.625rem', color: '#c084fc' }}>128x128 Grid Matrix</span>
+              <span style={{ fontSize: '0.625rem', color: '#d9c9a4' }}>128x128 Grid Matrix</span>
             </div>
 
           </div>
@@ -224,20 +220,20 @@ export const PixelInspectionPanel: React.FC<Props> = ({
               border: '1px solid rgba(255,255,255,0.05)',
             }}>
               <div>
-                <span style={{ color: '#64748b' }}>Frame Resolution: </span>
-                <strong style={{ color: '#f8fafc' }}>{pixelStats.image_width} &times; {pixelStats.image_height}</strong>
+                <span style={{ color: 'rgba(255,255,255,0.44)' }}>Frame Resolution: </span>
+                <strong style={{ color: '#f4f6f0' }}>{pixelStats.image_width} &times; {pixelStats.image_height}</strong>
               </div>
               <div>
-                <span style={{ color: '#64748b' }}>Total Image Pixels: </span>
-                <strong style={{ color: '#38bdf8' }}>{pixelStats.total_pixels.toLocaleString()} px</strong>
+                <span style={{ color: 'rgba(255,255,255,0.44)' }}>Total Image Pixels: </span>
+                <strong style={{ color: '#d3e3bb' }}>{pixelStats.total_pixels.toLocaleString()} px</strong>
               </div>
               <div>
-                <span style={{ color: '#64748b' }}>Raw Byte Payload: </span>
-                <strong style={{ color: '#a7f3d0' }}>{(pixelStats.total_bytes / 1024).toFixed(1)} KB</strong>
+                <span style={{ color: 'rgba(255,255,255,0.44)' }}>Raw Byte Payload: </span>
+                <strong style={{ color: '#c3ead4' }}>{(pixelStats.total_bytes / 1024).toFixed(1)} KB</strong>
               </div>
               <div>
-                <span style={{ color: '#64748b' }}>Face Crop Area: </span>
-                <strong style={{ color: '#fde047' }}>
+                <span style={{ color: 'rgba(255,255,255,0.44)' }}>Face Crop Area: </span>
+                <strong style={{ color: '#f0dc96' }}>
                   {pixelStats.face_crop_pixels ? `${pixelStats.face_crop_pixels.toLocaleString()} px` : 'N/A'}
                 </strong>
               </div>
@@ -249,14 +245,13 @@ export const PixelInspectionPanel: React.FC<Props> = ({
       {/* TAB 2: PIXEL DATA MATRIX & COLOR CODES TABLE */}
       {activeTab === 'pixels' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <div style={{ fontSize: '0.8125rem', color: '#cbd5e1' }}>
-            Discrete pixel RGB/BGR numerical values sampled directly from the face matrix:
+          <div style={{ fontSize: '0.8125rem', color: 'rgba(255,255,255,0.78)' }}> Discrete pixel RGB/BGR numerical values sampled directly from the face matrix:
           </div>
 
           <div style={{ overflowX: 'auto', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem', fontFamily: 'monospace', textAlign: 'left' }}>
               <thead>
-                <tr style={{ background: 'rgba(255,255,255,0.05)', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+                <tr style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.62)', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
                   <th style={{ padding: '8px 10px' }}>Coordinate</th>
                   <th style={{ padding: '8px 10px' }}>Color Swatch</th>
                   <th style={{ padding: '8px 10px' }}>RGB Code</th>
@@ -269,7 +264,7 @@ export const PixelInspectionPanel: React.FC<Props> = ({
                 {pixelStats?.sample_pixels && pixelStats.sample_pixels.length > 0 ? (
                   pixelStats.sample_pixels.map((p, idx) => (
                     <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                      <td style={{ padding: '6px 10px', color: '#38bdf8' }}>{p.coordinate}</td>
+                      <td style={{ padding: '6px 10px', color: '#d3e3bb' }}>{p.coordinate}</td>
                       <td style={{ padding: '6px 10px' }}>
                         <span style={{
                           display: 'inline-block',
@@ -281,16 +276,15 @@ export const PixelInspectionPanel: React.FC<Props> = ({
                           verticalAlign: 'middle',
                         }} />
                       </td>
-                      <td style={{ padding: '6px 10px', color: '#f87171' }}>{p.rgb}</td>
-                      <td style={{ padding: '6px 10px', color: '#60a5fa' }}>{p.bgr}</td>
-                      <td style={{ padding: '6px 10px', color: '#fde047' }}>{p.hex}</td>
-                      <td style={{ padding: '6px 10px', color: '#34d399' }}>{p.grayscale}</td>
+                      <td style={{ padding: '6px 10px', color: '#e89a9a' }}>{p.rgb}</td>
+                      <td style={{ padding: '6px 10px', color: '#b3c79a' }}>{p.bgr}</td>
+                      <td style={{ padding: '6px 10px', color: '#f0dc96' }}>{p.hex}</td>
+                      <td style={{ padding: '6px 10px', color: '#9ce0b8' }}>{p.grayscale}</td>
                     </tr>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={6} style={{ padding: '16px', textAlign: 'center', color: '#64748b' }}>
-                      Capture a frame or load an image to inspect live RGB/BGR pixel values.
+                    <td colSpan={6} style={{ padding: '16px', textAlign: 'center', color: 'rgba(255,255,255,0.44)' }}> Capture a frame or load an image to inspect live RGB/BGR pixel values.
                     </td>
                   </tr>
                 )}
@@ -298,8 +292,8 @@ export const PixelInspectionPanel: React.FC<Props> = ({
             </table>
           </div>
 
-          <div style={{ fontSize: '0.6875rem', color: '#64748b' }}>
-            💡 <em>Note: OpenCV uses BGR channel ordering by default. We convert incoming RGB frames using <code>cv2.COLOR_RGB2BGR</code> and compute 8-bit Grayscale as $Y = 0.299R + 0.587G + 0.114B$.</em>
+          <div style={{ fontSize: '0.6875rem', color: 'rgba(255,255,255,0.44)' }}>
+             <em>Note: OpenCV uses BGR channel ordering by default. We convert incoming RGB frames using <code>cv2.COLOR_RGB2BGR</code> and compute 8-bit Grayscale as $Y = 0.299R + 0.587G + 0.114B$.</em>
           </div>
         </div>
       )}
@@ -307,16 +301,15 @@ export const PixelInspectionPanel: React.FC<Props> = ({
       {/* TAB 3: OPENCV PYTHON PIPELINE CODE */}
       {activeTab === 'code' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <div style={{ fontSize: '0.8125rem', color: '#cbd5e1' }}>
-            Python backend image transformation code executing in <code>app/services/face_processor.py</code>:
+          <div style={{ fontSize: '0.8125rem', color: 'rgba(255,255,255,0.78)' }}> Python backend image transformation code executing in <code>app/services/face_processor.py</code>:
           </div>
 
           <pre style={{
-            background: '#020617',
+            background: '#12140f',
             border: '1px solid rgba(255,255,255,0.1)',
             borderRadius: '8px',
             padding: '12px',
-            color: '#38bdf8',
+            color: '#d3e3bb',
             fontFamily: 'monospace',
             fontSize: '0.75rem',
             overflowX: 'auto',
