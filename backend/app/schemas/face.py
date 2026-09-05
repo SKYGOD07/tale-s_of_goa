@@ -67,6 +67,12 @@ class VerificationResponse(BaseModel):
     status: str
     timestamp: str
     block_number: Optional[int] = None
+    # True when the RPC/contract/key is not configured and the result is a local
+    # dry run rather than a broadcast transaction.
+    simulated: bool = False
+    chain_id: Optional[int] = None
+    explorer_url: Optional[str] = None
+    gas_used: Optional[int] = None
     error: Optional[str] = None
 
 class CompareRequest(BaseModel):
@@ -109,4 +115,23 @@ class VerificationQueryResponse(BaseModel):
     timestamp_iso: Optional[str] = None
     recorder: Optional[str] = None
     network: str
+    chain_id: Optional[int] = None
+    simulated: bool = False
+    explorer_url: Optional[str] = None
     error: Optional[str] = None
+
+
+class ChainStatusResponse(BaseModel):
+    chain_id: int
+    network: str
+    rpc_url: str
+    contract_address: Optional[str] = None
+    explorer_url: Optional[str] = None
+    configured: bool
+    connected: bool
+    live: bool
+    account: Optional[str] = None
+    balance_eth: Optional[float] = None
+    block_number: Optional[int] = None
+    message: str = ""
+
