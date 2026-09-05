@@ -23,6 +23,7 @@ a terminal; the web UI is optional.
 5. [Blockchain by terminal](#5-blockchain-by-terminal)
 6. [Acceptance tests](#6-acceptance-tests)
 7. [Reading the numbers](#7-reading-the-numbers)
+7a. [`NO MATCH FOUND` — why, and how to get a match](#7a-no-match-found---why-and-how-to-get-a-match)
 8. [Optional: the web UI](#8-optional-the-web-ui)
 9. [Screen-recording script](#9-screen-recording-script)
 10. [Troubleshooting](#10-troubleshooting)
@@ -590,7 +591,104 @@ no hint is required. See [Section 3](#3-api-keys--what-exists-what-is-required).
 | `Candidates: 12 considered / 12 verified`, none passed | The search ran; your face is not in those results | Correct behaviour. Try a different hint, or use tab `02` |
 | `no face in candidate image` on every row | Candidates had no detectable faces | Try a hint that returns portrait photos |
 | `No face detected in the supplied image` | The **input** failed detection | Use a clearer, more frontal photo |
+### Searching for your own handle or social profile
 
+Entering your own name or handle (`adityatomar4877-rgb`, `Aditya Tomar`) is a
+legitimate test, but it helps to know what the search can and cannot reach.
+
+#### What the live search actually queries
+
+Two live calls per run:
+
+```python
+DDGS().images(query, max_results=12)
+DDGS().text(f"{query} (site:github.com OR site:x.com OR site:reddit.com OR site:wikipedia.org)")
+```
+
+The site filter is **GitHub, X/Twitter, Reddit and Wikipedia**. Instagram and
+Facebook are **not** in it — their public indexes are thin and largely behind
+login walls, so including them mostly returns pages with no usable image. The
+image search itself is unfiltered and may still surface other platforms.
+
+#### Why your own handle usually returns no match
+
+| Reason | What appears in the audit | Is it a bug? |
+|---|---|---|
+| Profile picture is an illustration, logo, initials or anime avatar | `no face in candidate image` | No |
+| Account is private or behind a login wall (Instagram, Facebook) | `image could not be downloaded or decoded`, or no candidates | No |
+| You are simply not in a public web image index | `Candidates: 0 considered`, or all rows rejected | No |
+| Search found real photos of a **different** person with a similar name | rows with `L2 > 1.128`, rejected | No — working correctly |
+
+> **A correction worth knowing.** A profile picture that is *not a face* is
+> rejected at the **detection** stage with `no face in candidate image` — YuNet
+> finds nothing to embed. It is **not** rejected by an `L2 > 1.128` comparison,
+> because no embedding is ever produced for it.
+>
+> The distinction is visible in `candidate_report`: a detection rejection has
+> `faces_found: 0` and no scores, while a biometric rejection has
+> `faces_found: 1` and a real L2 value.
+
+#### A note specific to this repository
+
+`adityatomar4877-rgb` was one of the **five hardcoded entries** in the deleted
+`AUTONOMOUS_CANDIDATE_POOL`. In the earlier build that handle appeared to
+"match" because its avatar was downloaded and compared on every single run,
+whatever face was supplied.
+
+That pool is gone. Searching that handle now goes through the same live query and
+the same mandatory face gate as any other input — so a match today means the face
+genuinely matched, and no match means it genuinely did not. See
+[ARCHITECTURE.md §12](ARCHITECTURE.md#12-audit-history--what-was-wrong-before).
+
+### Demonstrating both outcomes
+
+For the recording, show the negative **and** the positive. The negative is the
+stronger evidence.
+
+| Order | Run | Shows |
+|---|---|---|
+| 1 | Your face, **no hint** | `NO MATCH FOUND`, `Candidates: 0 considered` — nothing invented |
+| 2 | Your face, hint = **someone else's name** | 12 real candidates found, **all rejected** on L2 — the search is genuinely face-gated |
+| 3 | That person's photo, **same hint** | Candidates checked → `MATCH CONFIRMED` → `CONFIRMED ON-CHAIN` |
+
+Run 2 is what proves compliance with requirement 2. A hardcoded system would have
+returned a match there.
+
+```powershell
+cd "C:\Tales of Goa\backend"
+
+# 1 - honest empty result
+.\.venv\Scripts\python.exe run_pipeline.py --image "tests\fixtures\same_person\02_you_2026-09-05.jpg"
+
+# 2 - real candidates, all rejected  (wait ~20s between search runs)
+.\.venv\Scripts\python.exe run_pipeline.py --image "tests\fixtures\same_person\02_you_2026-09-05.jpg" --query "Bill Gates"
+
+# 3 - genuine match, committed on-chain
+.\.venv\Scripts\python.exe run_pipeline.py --image "tests\fixtures\different_person\02_other_person.jpg" --query "Serena Williams"
+```
+
+#### Describing it accurately
+
+If you narrate the recording, this wording is defensible:
+
+> "With no hint and no reverse-image key there is nothing to query — a
+> 128-dimensional vector cannot be sent to a text search engine. The pipeline
+> reports no match and zero candidates rather than inventing one.
+>
+> With a hint, the live search returns real candidate pages. Every candidate
+> image is downloaded, every face in it is detected and embedded, and each is
+> compared against the input face. Only a candidate below the published SFace
+> threshold of L2 1.128 is returned. Supplying my own face with someone else's
+> name finds that person's real photos and rejects all of them — which is what
+> shows the result is not pre-picked."
+
+Two claims to avoid, because they are not true of this build:
+
+- that the system "searches Instagram and Facebook" — it does not target them
+- that a non-face avatar is "rejected by L2" — it is rejected before any
+  comparison happens
+
+---
 
 ## 8. Optional: the web UI
 

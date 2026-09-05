@@ -7,6 +7,16 @@ export function SocialDiscoveryPipeline() {
   const [inputImage, setInputImage] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [threshold, setThreshold] = useState<number>(1.128);
+  // The no-match panel offers a one-click route to the hint field, which is
+  // collapsed by default and therefore easy to miss.
+  const hintDetailsRef = useRef<HTMLDetailsElement>(null);
+  const hintInputRef = useRef<HTMLInputElement>(null);
+
+  const focusHint = () => {
+    if (hintDetailsRef.current) hintDetailsRef.current.open = true;
+    hintDetailsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    window.setTimeout(() => hintInputRef.current?.focus(), 350);
+  };
   const [loading, setLoading] = useState<boolean>(false);
   const [stepState, setStepState] = useState<number>(0);
   const [result, setResult] = useState<SocialSearchPipelineResponse | null>(null);
@@ -243,11 +253,12 @@ export function SocialDiscoveryPipeline() {
             </div>
 
             {/* Optional Collapsible Filter for edge cases (hidden by default) */}
-            <details style={{ marginTop: '0.75rem' }}>
+            <details ref={hintDetailsRef} style={{ marginTop: '0.75rem' }}>
               <summary style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.44)', cursor: 'pointer', outline: 'none' }}> Optional Search Hint (Leave blank for pure face-driven search)
               </summary>
               <div style={{ marginTop: '0.4rem' }}>
                 <input
+                  ref={hintInputRef}
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
