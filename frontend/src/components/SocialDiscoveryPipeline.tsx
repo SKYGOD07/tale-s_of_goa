@@ -1,7 +1,12 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
-import { runSocialSearchPipeline, SocialSearchPipelineResponse } from '../services/api';
+import React, { useState, useRef, useEffect } from 'react';
+import {
+  runSocialSearchPipeline,
+  getSearchCapabilities,
+  SocialSearchPipelineResponse,
+  SearchCapabilities,
+} from '../services/api';
 
 export function SocialDiscoveryPipeline() {
   const [inputImage, setInputImage] = useState<string | null>(null);
@@ -9,6 +14,17 @@ export function SocialDiscoveryPipeline() {
   const [threshold, setThreshold] = useState<number>(1.128);
   // The no-match panel offers a one-click route to the hint field, which is
   // collapsed by default and therefore easy to miss.
+  // What the backend can actually do. The panel below must describe this
+  // rather than promising face-only discovery that needs an API key.
+  const [caps, setCaps] = useState<SearchCapabilities | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getSearchCapabilities()
+      .then((c) => { if (!cancelled) setCaps(c.search); })
+      .catch(() => { if (!cancelled) setCaps(null); });
+    return () => { cancelled = true; };
+  }, []);
+
   const hintDetailsRef = useRef<HTMLDetailsElement>(null);
   const hintInputRef = useRef<HTMLInputElement>(null);
 
@@ -210,13 +226,46 @@ export function SocialDiscoveryPipeline() {
                 marginBottom: '1rem',
               }}
             >
+              {/* Describes the mechanism that is actually available. The old
+                  copy advertised "100% face-driven, no keyword needed", which
+                  only holds with a reverse-image API key configured - without
+                  one, leaving the hint blank can never return a result. */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.4rem' }}>
-                <span style={{ fontSize: '0.75rem', background: '#9fb886', color: '#ffffff', padding: '0.15rem 0.5rem', borderRadius: '4px', fontWeight: 400 }}> AUTO-DISCOVERY
+                <span style={{
+                  fontSize: '0.75rem',
+                  background: caps?.reverse_image_available ? '#9fb886' : '#cbbfa0',
+                  color: '#12140f',
+                  padding: '0.15rem 0.5rem',
+                  borderRadius: '4px',
+                  fontWeight: 500,
+                }}>
+                  {caps?.reverse_image_available ? 'FACE-DRIVEN' : 'FACE-GATED'}
                 </span>
-                <span style={{ fontSize: '0.85rem', color: '#f4f6f0', fontWeight: 400 }}> 100% Face-Driven Search
+                <span style={{ fontSize: '0.85rem', color: '#f4f6f0', fontWeight: 400 }}>
+                  {caps?.reverse_image_available
+                    ? `Reverse image search via ${caps.reverse_image_search}`
+                    : 'Live search, verified against your face'}
                 </span>
               </div>
-              <p style={{ margin: 0, fontSize: '0.8rem', color: 'rgba(255,255,255,0.62)', lineHeight: 1.5 }}> No name or keyword needed. The system analyzes the 128D biometric vector of the input face scan, autonomously queries live web & social indices, extracts public candidate post faces, and evaluates biometric distance.
+              <p style={{ margin: 0, fontSize: '0.8rem', color: 'rgba(255,255,255,0.62)', lineHeight: 1.5 }}>
+                {caps?.reverse_image_available ? (
+                  <>
+                    The face image itself is sent to the visual-search provider, so no
+                    name or keyword is needed. Every candidate returned is then
+                    re-detected, embedded and compared against your scan.
+                  </>
+                ) : caps?.live_search_available ? (
+                  <>
+                    <strong style={{ color: '#e8c46a' }}>A search hint is required.</strong>{' '}
+                    A 128D face vector cannot be sent to a text search engine, so discovery
+                    is seeded by a name or handle &mdash; then <strong>every</strong> candidate
+                    image is downloaded, every face in it embedded, and compared against your
+                    scan. Only a candidate under L&#8322; {caps ? 1.128 : ''} is returned.
+                    Face-only search needs a reverse-image API key.
+                  </>
+                ) : (
+                  <>Checking which discovery mechanism is available&hellip;</>
+                )}
               </p>
             </div>
 
@@ -254,7 +303,15 @@ export function SocialDiscoveryPipeline() {
 
             {/* Optional Collapsible Filter for edge cases (hidden by default) */}
             <details ref={hintDetailsRef} style={{ marginTop: '0.75rem' }}>
-              <summary style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.44)', cursor: 'pointer', outline: 'none' }}> Optional Search Hint (Leave blank for pure face-driven search)
+              <summary style={{
+                fontSize: '0.75rem',
+                color: caps && !caps.reverse_image_available ? '#e8c46a' : 'rgba(255,255,255,0.44)',
+                cursor: 'pointer',
+                outline: 'none',
+              }}>
+                {caps?.reverse_image_available
+                  ? 'Optional Search Hint (leave blank for pure face-driven search)'
+                  : 'Search Hint — required: a name or handle to seed discovery'}
               </summary>
               <div style={{ marginTop: '0.4rem' }}>
                 <input
