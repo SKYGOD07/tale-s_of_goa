@@ -371,6 +371,70 @@ export function SocialDiscoveryPipeline() {
             {result.message}
           </p>
 
+          {/* What to do next. Branches on whether anything was actually
+              searched: zero candidates means there was no query to run, which
+              is a different situation from candidates checked and rejected. */}
+          {(() => {
+            const d = result.diagnostics?.search;
+            const nothingSearched = !d || d.candidates_considered === 0;
+            return (
+              <div
+                style={{
+                  background: 'rgba(32, 36, 26, 0.60)',
+                  border: '1px solid var(--rule-strong)',
+                  borderRadius: '10px',
+                  padding: '1rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.6rem',
+                }}
+              >
+                <div style={{ fontSize: '0.8rem', color: '#f4f6f0' }}>
+                  {nothingSearched
+                    ? 'Nothing was searched, so nothing was rejected.'
+                    : `${d!.candidates_verified} candidate image(s) were checked and none matched this face.`}
+                </div>
+
+                {nothingSearched ? (
+                  <p style={{ margin: 0, fontSize: '0.78rem', color: 'rgba(255,255,255,0.62)', lineHeight: 1.6 }}>
+                    A 128D face vector cannot be sent to a text search engine on its own.
+                    Give the search something to start from &mdash; either a name/handle hint,
+                    or a reverse-image API key for true face-only discovery.
+                  </p>
+                ) : (
+                  <p style={{ margin: 0, fontSize: '0.78rem', color: 'rgba(255,255,255,0.62)', lineHeight: 1.6 }}>
+                    The search ran and found real candidates, but none passed the biometric
+                    threshold. That is the correct result &mdash; a match is never invented.
+                    Try a different hint, or use tab <strong>02 1-to-1 verification</strong> to
+                    compare two images directly.
+                  </p>
+                )}
+
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.2rem' }}>
+                  <button
+                    onClick={focusHint}
+                    style={{
+                      background: 'linear-gradient(135deg, #8fa877 0%, #6f8a55 100%)',
+                      color: '#12140f',
+                      border: 'none',
+                      borderRadius: '8px',
+                      padding: '0.5rem 0.9rem',
+                      fontSize: '0.78rem',
+                      fontWeight: 500,
+                      cursor: 'pointer',
+                      fontFamily: 'inherit',
+                    }}
+                  >
+                    Add a search hint in Step 2
+                  </button>
+                  <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.44)', alignSelf: 'center' }}>
+                    e.g. a public name or handle, then re-run
+                  </span>
+                </div>
+              </div>
+            );
+          })()}
+
           {result.diagnostics?.search && (
             <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.44)' }}>
               <div style={{ marginBottom: '0.5rem' }}>
@@ -383,7 +447,10 @@ export function SocialDiscoveryPipeline() {
                   <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {c.image_url}
                   </span>
-                  <span className="mono" style={{ color: '#d3e3bb' }}>
+                  <span style={{ color: 'rgba(255,255,255,0.44)', whiteSpace: 'nowrap' }}>
+                    {c.faces_found} face{c.faces_found === 1 ? '' : 's'}
+                  </span>
+                  <span className="mono" style={{ color: c.euclidean_distance != null ? '#d3e3bb' : '#e8c46a', whiteSpace: 'nowrap' }}>
                     {c.euclidean_distance != null ? `L2 ${c.euclidean_distance.toFixed(4)}` : (c.error || '-')}
                   </span>
                 </div>
