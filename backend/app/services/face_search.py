@@ -46,14 +46,23 @@ from app.services.face_processor import (
     SFACE_L2_THRESHOLD,
 )
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
 
-REVERSE_PROVIDER = os.getenv("REVERSE_IMAGE_PROVIDER", "").strip().lower()
-SERPAPI_KEY = os.getenv("SERPAPI_KEY", "").strip()
-BING_VISUAL_SEARCH_KEY = os.getenv("BING_VISUAL_SEARCH_KEY", "").strip()
+def get_reverse_provider() -> str:
+    return os.getenv("REVERSE_IMAGE_PROVIDER", "").strip().lower()
+
+def get_serpapi_key() -> str:
+    return os.getenv("SERPAPI_KEY", "").strip()
+
+def get_bing_key() -> str:
+    return os.getenv("BING_VISUAL_SEARCH_KEY", "").strip()
 
 MAX_CANDIDATES = 12
 MAX_FACES_PER_CANDIDATE = 6
@@ -122,10 +131,14 @@ def search_capabilities() -> Dict[str, Any]:
     except ImportError:
         live_ok = False
 
+    rev_prov = get_reverse_provider()
+    serp_key = get_serpapi_key()
+    bing_key = get_bing_key()
+
     provider = None
-    if REVERSE_PROVIDER == "serpapi" and SERPAPI_KEY:
+    if rev_prov == "serpapi" and serp_key:
         provider = "SerpAPI (Google Lens)"
-    elif REVERSE_PROVIDER == "bing" and BING_VISUAL_SEARCH_KEY:
+    elif rev_prov == "bing" and bing_key:
         provider = "Bing Visual Search"
 
     return {
@@ -151,15 +164,18 @@ async def _reverse_image_candidates(image_bytes: bytes) -> List[Candidate]:
     if not caps["reverse_image_available"]:
         return []
 
+    rev_prov = get_reverse_provider()
+    bing_key = get_bing_key()
+
     out: List[Candidate] = []
     try:
-        if REVERSE_PROVIDER == "bing":
+        if rev_prov == "bing":
             # Bing Visual Search accepts the image binary directly, so it works
             # on a local photo with no public URL - the right fit here.
             async with httpx.AsyncClient(timeout=20.0) as client:
                 resp = await client.post(
                     "https://api.bing.microsoft.com/v7.0/images/visualsearch",
-                    headers={"Ocp-Apim-Subscription-Key": BING_VISUAL_SEARCH_KEY},
+                    headers={"Ocp-Apim-Subscription-Key": bing_key},
                     files={"image": ("face.jpg", image_bytes, "image/jpeg")},
                 )
                 resp.raise_for_status()
@@ -175,7 +191,7 @@ async def _reverse_image_candidates(image_bytes: bytes) -> List[Candidate]:
                                     platform=detect_platform(page),
                                     source="reverse_image:bing",
                                 ))
-        elif REVERSE_PROVIDER == "serpapi":
+        elif rev_prov == "serpapi":
             # Google Lens via SerpAPI needs a publicly reachable image URL, so it
             # cannot be handed a local photo. Left wired for deployments that
             # host the scan somewhere fetchable.
