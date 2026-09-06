@@ -76,6 +76,17 @@
   /* ── Motion ─────────────────────────────────────────────────────────── */
   --ease:       cubic-bezier(.22, .61, .36, 1);
   --ease-out:   cubic-bezier(.16, 1, .3, 1);
+  /* Overshoots slightly, the way a physical control settles. Used only on
+     elements that ENTER; never on colour or size changes, where the bounce
+     reads as a glitch rather than as weight. */
+  --ease-spring: cubic-bezier(.34, 1.42, .48, 1);
+  /* Fast out, slow in - for anything the operator is waiting on. */
+  --ease-emph:  cubic-bezier(.2, .9, .2, 1);
+
+  --dur-fast:   140ms;
+  --dur-base:   260ms;
+  --dur-slow:   520ms;
+  --dur-enter:  700ms;
 
   --radius:     14px;
   --radius-lg:  20px;
@@ -279,3 +290,287 @@ code, pre, .mono { font-family: var(--mono); font-weight: 400; }
   background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.26); background-clip: content-box; }
+
+
+/* ══════════════════════════════════════════════════════════════════════
+   Liquid glass
+
+   One material, three weights. The look comes from four layers stacked in
+   a fixed order, which is what separates it from a flat translucent box:
+
+     1. a blurred, saturated backdrop           (backdrop-filter)
+     2. a tinted body                            (background)
+     3. a hairline INNER highlight along the top (inset box-shadow)
+     4. a slow specular sweep across the surface (::after)
+
+   Cost control matters here: backdrop-filter forces the compositor to
+   re-sample everything behind the element, and this app already runs a 3D
+   scene. So the blur radius stays modest, `.glass` is meant for a handful
+   of large surfaces rather than every card, and a `@supports` fallback
+   paints an opaque panel where the filter is unavailable.
+   ══════════════════════════════════════════════════════════════════════ */
+
+.glass {
+  position: relative;
+  isolation: isolate;
+  background: linear-gradient(
+    160deg,
+    rgba(255, 255, 255, 0.055) 0%,
+    rgba(255, 255, 255, 0.018) 42%,
+    rgba(0, 0, 0, 0.10) 100%
+  ), var(--surface);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-lg);
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.10),   /* top highlight  */
+    inset 0 -1px 0 0 rgba(0, 0, 0, 0.22),        /* bottom shade   */
+    0 18px 46px -22px rgba(0, 0, 0, 0.75);       /* cast shadow    */
+  overflow: hidden;
+}
+
+.glass--strong {
+  backdrop-filter: blur(30px) saturate(165%);
+  -webkit-backdrop-filter: blur(30px) saturate(165%);
+  background: linear-gradient(
+    160deg,
+    rgba(255, 255, 255, 0.075) 0%,
+    rgba(255, 255, 255, 0.022) 46%,
+    rgba(0, 0, 0, 0.14) 100%
+  ), var(--surface-raised);
+}
+
+.glass--quiet {
+  backdrop-filter: blur(10px) saturate(125%);
+  -webkit-backdrop-filter: blur(10px) saturate(125%);
+  border-radius: var(--radius);
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.07),
+    0 10px 26px -18px rgba(0, 0, 0, 0.7);
+}
+
+/* The specular sweep. Sits above the body, below the content, and never
+   intercepts a click. */
+.glass::after {
+  content: '';
+  position: absolute;
+  inset: -40% -60%;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    transparent 38%,
+    rgba(255, 255, 255, 0.055) 48%,
+    rgba(255, 255, 255, 0.10) 51%,
+    rgba(255, 255, 255, 0.055) 54%,
+    transparent 64%
+  );
+  transform: translateX(-42%);
+  opacity: 0;
+  transition: opacity var(--dur-slow) var(--ease-out);
+}
+
+.glass--lit::after,
+.glass:hover::after { opacity: 1; }
+
+.glass--sweep::after {
+  opacity: 1;
+  animation: glassSweep 5.2s var(--ease) infinite;
+}
+
+@keyframes glassSweep {
+  0%        { transform: translateX(-42%); }
+  55%, 100% { transform: translateX(42%);  }
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass, .glass--strong, .glass--quiet { background: var(--surface-solid); }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   Entrances
+
+   Everything enters along one axis with a short overshoot. `--i` staggers a
+   list without a per-item style rule or a JS timer.
+   ══════════════════════════════════════════════════════════════════════ */
+
+@keyframes riseIn {
+  from { opacity: 0; transform: translate3d(0, 14px, 0) scale(.985); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes fadeIn      { from { opacity: 0; } to { opacity: 1; } }
+@keyframes scaleIn     { from { opacity: 0; transform: scale(.94); } to { opacity: 1; transform: none; } }
+@keyframes slideInLeft { from { opacity: 0; transform: translate3d(-18px, 0, 0); } to { opacity: 1; transform: none; } }
+@keyframes blurIn      { from { opacity: 0; filter: blur(9px); transform: scale(1.03); }
+                         to   { opacity: 1; filter: blur(0);   transform: none; } }
+
+.enter        { animation: riseIn var(--dur-enter) var(--ease-spring) both; }
+.enter-fade   { animation: fadeIn var(--dur-slow)  var(--ease-out)    both; }
+.enter-scale  { animation: scaleIn var(--dur-slow) var(--ease-spring) both; }
+.enter-blur   { animation: blurIn  var(--dur-slow) var(--ease-out)    both; }
+.enter-left   { animation: slideInLeft var(--dur-slow) var(--ease-out) both; }
+
+/* Stagger: set style={{ '--i': n }} on each child. */
+.stagger > *        { animation: riseIn var(--dur-enter) var(--ease-spring) both; }
+.stagger > *:nth-child(1) { animation-delay: 40ms; }
+.stagger > *:nth-child(2) { animation-delay: 100ms; }
+.stagger > *:nth-child(3) { animation-delay: 160ms; }
+.stagger > *:nth-child(4) { animation-delay: 220ms; }
+.stagger > *:nth-child(5) { animation-delay: 280ms; }
+.stagger > *:nth-child(6) { animation-delay: 340ms; }
+.delay-i { animation-delay: calc(var(--i, 0) * 70ms); }
+
+/* ══════════════════════════════════════════════════════════════════════
+   Waiting states
+
+   Three distinct signals, because they mean different things:
+     .shimmer   - content is coming, and its shape is already known
+     .spinner   - work is running, duration unknown
+     .progress  - work is running through NAMED stages
+   ══════════════════════════════════════════════════════════════════════ */
+
+.shimmer {
+  position: relative;
+  overflow: hidden;
+  background: var(--surface-sunken);
+  border-radius: 8px;
+}
+.shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.07) 45%,
+    rgba(255, 255, 255, 0.11) 50%,
+    rgba(255, 255, 255, 0.07) 55%,
+    transparent
+  );
+  animation: shimmerSweep 1.5s var(--ease) infinite;
+}
+@keyframes shimmerSweep { to { transform: translateX(100%); } }
+
+.spinner {
+  width: 1em;
+  height: 1em;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.16);
+  border-top-color: currentColor;
+  animation: spin .72s linear infinite;
+  flex: none;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.progress-track {
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--leaf-dim), var(--leaf));
+  transition: width var(--dur-slow) var(--ease-emph);
+}
+/* Running, but with no measurable percentage. */
+.progress-fill--indeterminate {
+  width: 38% !important;
+  animation: indeterminate 1.35s var(--ease) infinite;
+}
+@keyframes indeterminate {
+  0%   { transform: translateX(-120%); }
+  100% { transform: translateX(360%);  }
+}
+
+/* A stage that is currently running. The ring breathes rather than spins,
+   so several can run beside each other without the row looking frantic. */
+.pulse-ring {
+  position: relative;
+}
+.pulse-ring::before {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: inherit;
+  border: 1px solid var(--leaf-dim);
+  opacity: 0;
+  animation: pulseRing 1.9s var(--ease-out) infinite;
+  pointer-events: none;
+}
+@keyframes pulseRing {
+  0%   { opacity: .7; transform: scale(.94); }
+  70%  { opacity: 0;  transform: scale(1.12); }
+  100% { opacity: 0;  transform: scale(1.12); }
+}
+
+/* A value that just changed. One short flash, no loop. */
+@keyframes settle {
+  0%   { transform: translateY(-3px); opacity: .4; }
+  100% { transform: none; opacity: 1; }
+}
+.settle { animation: settle var(--dur-base) var(--ease-spring) both; }
+
+/* ══════════════════════════════════════════════════════════════════════
+   Interaction
+
+   Hover lifts, press sinks, and both are transform-only so they stay on
+   the compositor.
+   ══════════════════════════════════════════════════════════════════════ */
+
+.lift {
+  transition: transform var(--dur-base) var(--ease-out),
+              box-shadow var(--dur-base) var(--ease-out),
+              border-color var(--dur-base) var(--ease-out);
+  will-change: transform;
+}
+.lift:hover  { transform: translateY(-2px); border-color: var(--rule-bright); }
+.lift:active { transform: translateY(0) scale(.995); transition-duration: var(--dur-fast); }
+
+.press { transition: transform var(--dur-fast) var(--ease-out), filter var(--dur-fast) var(--ease-out); }
+.press:hover:not(:disabled)  { filter: brightness(1.06); }
+.press:active:not(:disabled) { transform: scale(.978); }
+
+.pill { transition: color var(--dur-base) var(--ease),
+                    background var(--dur-base) var(--ease),
+                    border-color var(--dur-base) var(--ease); }
+
+/* Focus is never animated away - keyboard users need it instantly. */
+:focus-visible { outline: 2px solid var(--rule-bright); outline-offset: 2px; }
+
+/* ══════════════════════════════════════════════════════════════════════
+   Reduced motion
+
+   The guard further up neutralises durations globally. These rules remove
+   the things that would still read as movement at 0.01ms - a sweep parked
+   mid-travel, or an element frozen in its start transform.
+   ══════════════════════════════════════════════════════════════════════ */
+
+@media (prefers-reduced-motion: reduce) {
+  .glass::after,
+  .shimmer::after,
+  .pulse-ring::before { display: none; }
+
+  .enter, .enter-fade, .enter-scale, .enter-blur, .enter-left,
+  .stagger > *, .settle {
+    opacity: 1 !important;
+    transform: none !important;
+    filter: none !important;
+  }
+
+  .lift:hover, .press:active { transform: none; }
+}
+
+/* A hairline that draws itself in, used under the wordmark. Scaling a 1px
+   element is cheaper than animating width, which would relayout. */
+@keyframes ruleDraw {
+  from { transform: scaleX(0); opacity: 0; }
+  to   { transform: scaleX(1); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [style*='ruleDraw'] { transform: none !important; opacity: 1 !important; }
+}
