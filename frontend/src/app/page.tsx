@@ -2,6 +2,7 @@
 
 import React, { useState, useCallback, useEffect } from 'react';
 import { SylvaHeroBackground } from '../components/SylvaHeroBackground';
+import { IntroExperience } from '../components/IntroExperience';
 import { CameraView } from '../components/CameraView';
 import { TestImageUpload } from '../components/TestImageUpload';
 import { DetectionStatus, PipelineStatus } from '../components/DetectionStatus';
@@ -56,6 +57,9 @@ function Stat({ label, value, tone }: { label: string; value: React.ReactNode; t
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<'pipeline' | 'compare' | 'register'>('pipeline');
+  /* The intro opens itself once per browser; this only forces it back open
+     when the operator asks for it from the header. */
+  const [introOpen, setIntroOpen] = useState(false);
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
   const [chain, setChain] = useState<ChainStatus | null>(null);
 
@@ -286,6 +290,8 @@ export default function Home() {
 
   return (
     <>
+      <IntroExperience open={introOpen} onClose={() => setIntroOpen(false)} />
+
       <SylvaHeroBackground />
 
       {/* Column guides, echoing the scene's own grid */}
@@ -330,6 +336,25 @@ export default function Home() {
                   <span className="eyebrow">HH Goa 2026</span>
                   <span style={{ width: 28, height: 1, background: 'var(--rule-bright)' }} />
                   <span className="tag tag--brand">Task 03</span>
+                  {/* The intro shows itself once, then lives here. Someone
+                      returning after a week should not have to remember how
+                      the pipeline is meant to be driven. */}
+                  <button
+                    className="pill press"
+                    onClick={() => setIntroOpen(true)}
+                    style={{
+                      background: 'transparent',
+                      border: '1px solid var(--rule-strong)',
+                      borderRadius: 999,
+                      color: 'var(--ink-faint)',
+                      padding: '3px 12px',
+                      fontSize: 'var(--t-micro)',
+                      cursor: 'pointer',
+                      fontFamily: 'inherit',
+                    }}
+                  >
+                    How it works
+                  </button>
                 </div>
 
                 <h1
@@ -500,14 +525,14 @@ export default function Home() {
 
           {/* ── TAB 01: automated discovery ───────────────────────────── */}
           {activeTab === 'pipeline' && (
-            <div className="rise" role="tabpanel">
+            <div className="enter" role="tabpanel" key="pipeline">
               <SocialDiscoveryPipeline />
             </div>
           )}
 
           {/* ── TAB 02: 1-to-1 comparison ─────────────────────────────── */}
           {activeTab === 'compare' && (
-            <div className="rise" role="tabpanel">
+            <div className="enter" role="tabpanel" key="compare">
               <FaceComparisonView />
             </div>
           )}
@@ -515,8 +540,9 @@ export default function Home() {
           {/* ── TAB 03: registration & on-chain proof ─────────────────── */}
           {activeTab === 'register' && (
             <div
-              className="rise"
+              className="enter"
               role="tabpanel"
+              key="register"
               style={{ display: 'flex', flexDirection: 'column', gap: 32 }}
             >
               <div

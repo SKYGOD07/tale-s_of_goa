@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
+import { PipelineStages } from './PipelineStages';
 import { FaceRegionSelector, CropRegion } from './FaceRegionSelector';
 import { LearningPanel } from './LearningPanel';
 import {
@@ -597,6 +598,7 @@ export function SocialDiscoveryPipeline() {
           </div>
 
           <button
+            className="press"
             disabled={loading || !inputImage || !authorizedUse}
             onClick={executePipeline}
             style={{
@@ -613,14 +615,19 @@ export function SocialDiscoveryPipeline() {
               alignItems: 'center',
               justifyContent: 'center',
               gap: '0.5rem',
-              boxShadow: '0 4px 12px rgba(211, 227, 187, 0.28)',
+              boxShadow: loading
+                ? '0 4px 12px rgba(211, 227, 187, 0.10)'
+                : '0 4px 12px rgba(211, 227, 187, 0.28)',
+              transition: 'background var(--dur-base) var(--ease), box-shadow var(--dur-base) var(--ease)',
             }}
           >
             {loading ? (
-              <> Running End-to-End Pipeline...
+              <>
+                <span className="spinner" aria-hidden />
+                Running End-to-End Pipeline&hellip;
               </>
             ) : (
-              <> Run End-to-End Task 3 Pipeline</>
+              <>Run End-to-End Task 3 Pipeline</>
             )}
           </button>
         </div>
@@ -641,28 +648,13 @@ export function SocialDiscoveryPipeline() {
         </div>
       )}
 
-      {/* PIPELINE PROGRESS STEPS */}
-      {loading && (
-        <div
-          style={{
-            background: '#171a13',
-            border: '1px solid #20241a',
-            borderRadius: '12px',
-            padding: '1.25rem',
-            display: 'flex',
-            justifyContent: 'space-around',
-          }}
-        >
-          <div style={{ textAlign: 'center', opacity: stepState >= 1 ? 1 : 0.4 }}>
-            <div style={{ fontSize: '0.85rem', color: '#d3e3bb', fontWeight: 400 }}>1. Face Ingestion</div>
-          </div>
-          <div style={{ textAlign: 'center', opacity: stepState >= 2 ? 1 : 0.4 }}>
-            <div style={{ fontSize: '0.85rem', color: '#c2d2a8', fontWeight: 400 }}>2. Web & Social Search</div>
-          </div>
-          <div style={{ textAlign: 'center', opacity: stepState >= 3 ? 1 : 0.4 }}>
-            <div style={{ fontSize: '0.85rem', color: '#9ce0b8', fontWeight: 400 }}>3. Blockchain Upload</div>
-          </div>
-        </div>
+      {/* PIPELINE PROGRESS.
+          The previous version dimmed inactive labels and did nothing else, so
+          a slow run and a hung one looked identical. This one names the stage
+          in flight, marks the ones that finished, and counts elapsed seconds -
+          which is the only thing that answers "is it stuck?". */}
+      {(loading || stepState > 0) && (
+        <PipelineStages step={stepState} running={loading} />
       )}
 
       {/* RESULT CARDS */}
