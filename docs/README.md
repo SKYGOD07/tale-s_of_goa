@@ -15,6 +15,7 @@ Face Identification & Blockchain Verification
 | Call the HTTP API | **[API.md](API.md)** |
 | Work with the smart contract | **[BLOCKCHAIN.md](BLOCKCHAIN.md)** |
 | Check task compliance | **[TASK.md](TASK.md)** |
+| Review the face-finder design and safeguards | **[FACE_FINDER_BUILD.md](FACE_FINDER_BUILD.md)** |
 | Read the original brief | **[task/task #3.txt](task/task%20%233.txt)** |
 
 ---
@@ -71,6 +72,10 @@ model, local vs Sepolia, and every terminal command for driving the chain.
 ### [TASK.md](TASK.md)
 The brief reproduced verbatim, a requirement-by-requirement compliance matrix
 with evidence, and the submission checklist.
+
+### [FACE_FINDER_BUILD.md](FACE_FINDER_BUILD.md)
+The two discovery modes, the fixed biometric decision threshold, media evidence
+fingerprinting, authorization gate, and recording checklist for the Face Finder.
 
 ---
 
