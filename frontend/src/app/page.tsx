@@ -320,8 +320,8 @@ export default function Home() {
                   }}
                 >
                   A 128-dimensional biometric embedding, reduced to a canonical SHA-256 record
-                  hash and anchored to an Ethereum smart contract. No image or vector ever
-                  leaves the machine.
+                  hash and anchored to an Ethereum smart contract. The blockchain receives no
+                  image or vector.
                 </p>
               </div>
 
