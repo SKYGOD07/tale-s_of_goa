@@ -25,6 +25,7 @@ Either way the verification stage is identical and mandatory.
 
 import io
 import os
+import re
 import hashlib
 import urllib.parse
 from dataclasses import dataclass, field
@@ -63,6 +64,9 @@ def get_serpapi_key() -> str:
 
 def get_bing_key() -> str:
     return os.getenv("BING_VISUAL_SEARCH_KEY", "").strip()
+
+def get_serper_key() -> str:
+    return os.getenv("SERPER_API_KEY", "").strip()
 
 MAX_CANDIDATES = 12
 MAX_FACES_PER_CANDIDATE = 6
@@ -135,8 +139,12 @@ def search_capabilities() -> Dict[str, Any]:
     serp_key = get_serpapi_key()
     bing_key = get_bing_key()
 
+    serper_key = get_serper_key()
+
     provider = None
-    if rev_prov == "serpapi" and serp_key:
+    if rev_prov == "serper" and serper_key:
+        provider = "Serper.dev (Google Lens)"
+    elif rev_prov == "serpapi" and serp_key:
         provider = "SerpAPI (Google Lens)"
     elif rev_prov == "bing" and bing_key:
         provider = "Bing Visual Search"
@@ -158,6 +166,53 @@ def search_capabilities() -> Dict[str, Any]:
 # Candidate gathering — every source here hits the live network
 # ─────────────────────────────────────────────────────────────────────────
 
+# Reverse-image providers cap the upload they accept (SerpAPI rejects large
+# posts with a bare 400). A full-resolution phone photo is routinely 1-3 MB, so
+# the probe is cropped to the face plus surrounding context and compressed
+# under the cap before it is sent. Cropping also helps accuracy: Google Lens
+# matches on the dominant subject, and a tight-ish portrait keeps the face
+# dominant instead of the background.
+REVERSE_PROBE_MAX_BYTES = 460_000
+REVERSE_PROBE_MAX_EDGE = 1024
+REVERSE_PROBE_CONTEXT = 0.6   # padding around the face box, as a fraction
+
+
+def prepare_probe_image(image_bytes: bytes) -> bytes:
+    """Face-centred, size-capped JPEG suitable for a reverse-image upload."""
+    try:
+        pil = ImageOps.exif_transpose(Image.open(io.BytesIO(image_bytes))).convert("RGB")
+        bgr = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
+
+        # Crop to the largest face with generous context, when one is found.
+        try:
+            dets, _, _ = detect_faces_detailed(bgr)
+        except Exception:
+            dets = []
+        if dets:
+            box = dets[0].box
+            fw = box["right"] - box["left"]
+            fh = box["bottom"] - box["top"]
+            px, py = int(fw * REVERSE_PROBE_CONTEXT), int(fh * REVERSE_PROBE_CONTEXT)
+            h, w = bgr.shape[:2]
+            bgr = bgr[max(0, box["top"] - py):min(h, box["bottom"] + py),
+                      max(0, box["left"] - px):min(w, box["right"] + px)]
+
+        # Cap the long edge, then step quality down until it fits.
+        h, w = bgr.shape[:2]
+        scale = min(1.0, REVERSE_PROBE_MAX_EDGE / max(h, w))
+        if scale < 1.0:
+            bgr = cv2.resize(bgr, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
+
+        for quality in (90, 80, 70, 60, 50, 40):
+            ok, buf = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, quality])
+            if ok and len(buf) <= REVERSE_PROBE_MAX_BYTES:
+                return buf.tobytes()
+        return buf.tobytes() if ok else image_bytes
+    except Exception as e:
+        print(f"[Face Search] probe preprocessing failed, sending original: {e}")
+        return image_bytes
+
+
 async def _reverse_image_candidates(image_bytes: bytes) -> List[Candidate]:
     """True face->web discovery. Only runs when a provider key is configured."""
     caps = search_capabilities()
@@ -166,6 +221,11 @@ async def _reverse_image_candidates(image_bytes: bytes) -> List[Candidate]:
 
     rev_prov = get_reverse_provider()
     bing_key = get_bing_key()
+    serp_key_local = get_serpapi_key()
+
+    probe = prepare_probe_image(image_bytes)
+    print(f"[Face Search] reverse-image probe: {len(image_bytes)/1024:.0f} KB "
+          f"-> {len(probe)/1024:.0f} KB")
 
     out: List[Candidate] = []
     try:
@@ -176,7 +236,7 @@ async def _reverse_image_candidates(image_bytes: bytes) -> List[Candidate]:
                 resp = await client.post(
                     "https://api.bing.microsoft.com/v7.0/images/visualsearch",
                     headers={"Ocp-Apim-Subscription-Key": bing_key},
-                    files={"image": ("face.jpg", image_bytes, "image/jpeg")},
+                    files={"image": ("face.jpg", probe, "image/jpeg")},
                 )
                 resp.raise_for_status()
                 for tag in resp.json().get("tags", []):
@@ -191,16 +251,141 @@ async def _reverse_image_candidates(image_bytes: bytes) -> List[Candidate]:
                                     platform=detect_platform(page),
                                     source="reverse_image:bing",
                                 ))
+        elif rev_prov == "serper":
+            # Serper.dev fronts Google Lens and takes the image inline as a
+            # base64 data URI, so a local photo works with no hosting step.
+            # Free tier is generous, which makes this the practical default.
+            import base64 as _b64
+            payload = {"image": "data:image/jpeg;base64," + _b64.b64encode(probe).decode()}
+            async with httpx.AsyncClient(timeout=45.0) as client:
+                resp = await client.post(
+                    "https://google.serper.dev/lens",
+                    headers={"X-API-KEY": get_serper_key(),
+                             "Content-Type": "application/json"},
+                    json=payload,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+            # Lens returns matches under either key depending on the query.
+            for key in ("organic", "visualMatches"):
+                for item in data.get(key, []) or []:
+                    page = item.get("link")
+                    img = item.get("imageUrl") or item.get("thumbnail")
+                    if page and img:
+                        out.append(Candidate(
+                            page_url=page, image_url=img,
+                            title=(item.get("title") or "")[:140],
+                            platform=detect_platform(page),
+                            source="reverse_image:serper",
+                        ))
+
         elif rev_prov == "serpapi":
-            # Google Lens via SerpAPI needs a publicly reachable image URL, so it
-            # cannot be handed a local photo. Left wired for deployments that
-            # host the scan somewhere fetchable.
-            print("[Face Search] SerpAPI Google Lens requires a public image URL; "
-                  "skipping for a locally supplied scan.")
+            # SerpAPI's Lens engine needs the image to be reachable by URL, but
+            # its own /image endpoint accepts an upload and hands back an
+            # image_id that the search accepts - so a local photo works after a
+            # two-step call rather than needing to be publicly hosted.
+            async with httpx.AsyncClient(timeout=45.0) as client:
+                up = await client.post(
+                    "https://serpapi.com/image",
+                    files={"image": ("query.jpg", probe, "image/jpeg")},
+                    data={"api_key": serp_key_local},
+                )
+                up.raise_for_status()
+                image_id = up.json().get("image_id")
+                if not image_id:
+                    raise RuntimeError("SerpAPI upload returned no image_id")
+
+                sr = await client.get(
+                    "https://serpapi.com/search.json",
+                    params={"engine": "google_lens", "image_id": image_id,
+                            "api_key": serp_key_local, "hl": "en", "country": "us"},
+                )
+                sr.raise_for_status()
+                data = sr.json()
+
+            for key in ("visual_matches", "exact_matches", "text_results"):
+                for item in data.get(key, []) or []:
+                    page = item.get("link")
+                    img = item.get("original") or item.get("thumbnail")
+                    if page and img:
+                        out.append(Candidate(
+                            page_url=page, image_url=img,
+                            title=(item.get("title") or "")[:140],
+                            platform=detect_platform(page),
+                            source=f"reverse_image:serpapi:{key}",
+                        ))
     except Exception as e:
         print(f"[Face Search] Reverse image search failed: {e}")
 
     return out[:MAX_CANDIDATES]
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Direct profile avatars
+#
+# Reverse image search can only surface photos a crawler has already indexed,
+# which is why an ordinary person returns nothing. A profile avatar is
+# different: it sits at a predictable public URL, so given a handle it can be
+# fetched directly and face-checked like any other candidate. That covers the
+# common "is this my GitHub picture?" case without any index at all.
+#
+# GitHub exposes https://github.com/<user>.png as a documented public avatar.
+# LinkedIn, Instagram and Facebook are deliberately NOT attempted: their
+# profile media sits behind a login wall and scraping it would breach their
+# terms. If those are wanted, the account owner can download their own picture
+# and use 1-to-1 verification instead.
+# ─────────────────────────────────────────────────────────────────────────
+
+_HANDLE_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$")
+
+
+def _extract_github_handle(query: str) -> Optional[str]:
+    """Pull a GitHub username out of a handle, @handle or profile URL."""
+    q = query.strip()
+    if not q:
+        return None
+    m = re.search(r"github\.com/([A-Za-z0-9][A-Za-z0-9-]{0,38})", q, re.I)
+    if m:
+        return m.group(1)
+    q = q.lstrip("@")
+    # Bare single token that looks like a username (not a person's full name).
+    if " " not in q and _HANDLE_RE.match(q):
+        return q
+    return None
+
+
+async def _profile_avatar_candidates(query: str) -> List[Candidate]:
+    """Fetch a public profile avatar for a handle, if one resolves."""
+    handle = _extract_github_handle(query)
+    if not handle:
+        return []
+
+    out: List[Candidate] = []
+    try:
+        async with httpx.AsyncClient(timeout=12.0, follow_redirects=True) as client:
+            # Confirm the account exists before trusting the avatar URL.
+            api = await client.get(
+                f"https://api.github.com/users/{handle}",
+                headers={"User-Agent": USER_AGENT, "Accept": "application/vnd.github+json"},
+            )
+            if api.status_code != 200:
+                return []
+            info = api.json()
+            avatar = info.get("avatar_url")
+            if not avatar:
+                return []
+            out.append(Candidate(
+                page_url=info.get("html_url") or f"https://github.com/{handle}",
+                image_url=avatar,
+                title=(info.get("name") or handle)[:140],
+                description=(info.get("bio") or "")[:240],
+                author=handle,
+                platform="GitHub",
+                source="direct:github_avatar",
+            ))
+    except Exception as e:
+        print(f"[Face Search] GitHub avatar lookup failed for {handle!r}: {e}")
+    return out
 
 
 async def _live_search_candidates(query: str) -> List[Candidate]:
@@ -364,14 +549,49 @@ async def discover_matching_post(
     candidates: List[Candidate] = []
     mechanisms: List[str] = []
 
+    # Every configured source is queried and the results merged. Running the
+    # hint search only when reverse-image found nothing meant a typed hint was
+    # silently discarded whenever Lens returned anything at all - even when the
+    # Lens results were useless. More candidates can only help: each one still
+    # has to pass the same biometric gate.
     if caps["reverse_image_available"] and scan_image_bytes:
         mechanisms.append(caps["reverse_image_search"])
         candidates.extend(await _reverse_image_candidates(scan_image_bytes))
 
-    if not candidates and query:
+    if query:
+        # A handle or profile URL resolves to that platform's avatar directly.
+        direct = await _profile_avatar_candidates(query)
+        if direct:
+            mechanisms.append("Direct profile avatar")
+            candidates.extend(direct)
+
         if caps["live_search_available"]:
             mechanisms.append(f"{caps['live_search_engine']} (text-seeded, face-gated)")
             candidates.extend(await _live_search_candidates(query))
+
+    # De-duplicate on image URL, keeping first-seen order.
+    seen_urls, merged = set(), []
+    for c in candidates:
+        if c.image_url not in seen_urls:
+            seen_urls.add(c.image_url)
+            merged.append(c)
+    candidates = merged
+
+    # Drop anything the operator has already rejected for THIS face, so a
+    # result dismissed as "not them" stops coming back on every re-run.
+    from app.services.feedback import suppressed_media
+    blocked = suppressed_media(scan_embedding, threshold=l2_threshold)
+    suppressed_count = 0
+    if blocked:
+        kept = []
+        for c in candidates:
+            if c.page_url in blocked:
+                suppressed_count += 1
+                continue
+            kept.append(c)
+        candidates = kept
+        if suppressed_count:
+            print(f"[Face Search] suppressed {suppressed_count} previously-rejected result(s)")
 
     note = ""
     if not candidates:
@@ -401,6 +621,11 @@ async def discover_matching_post(
                   f"faces={result.faces_found} cos={result.best_cosine:+.4f} "
                   f"L2={result.best_l2:.4f} -> {'MATCH' if result.is_match else 'no'}")
 
+    if blocked:
+        before = len(verified)
+        verified = [c for c in verified if (c.media_sha256 or "") not in blocked]
+        suppressed_count += before - len(verified)
+
     passing = [c for c in verified if c.is_match and c.best_l2 is not None]
     passing.sort(key=lambda c: c.best_l2)
     best_match = passing[0] if passing else None
@@ -417,7 +642,13 @@ async def discover_matching_post(
 
     return {
         "match": best_match,
+        # Every candidate that passed the biometric gate, best first. A face
+        # search legitimately returns several photos of the same person across
+        # different pages, and showing only the single best one hides most of
+        # the evidence. Each entry carries its own score and source URL.
+        "matches": passing,
         "candidates_considered": len(candidates),
+        "suppressed_previously_rejected": suppressed_count,
         "candidates_verified": len(scored),
         "search_mechanisms": mechanisms,
         "capabilities": caps,

@@ -109,7 +109,7 @@ local ONNX models, keyless DuckDuckGo search.
 | `SEPOLIA_RPC_URL` | `https://ethereum-sepolia-rpc.publicnode.com` | Sepolia only |
 | `DEPLOYER_PRIVATE_KEY` | Hardhat dev account #0 | Sepolia only |
 | `ETHERSCAN_API_KEY` | *(empty)* | ⬜ optional |
-| `REVERSE_IMAGE_PROVIDER` | *(empty)* | ⬜ optional |
+| `REVERSE_IMAGE_PROVIDER` | `serpapi` | ⬜ optional — enables face-only search |
 | `BING_VISUAL_SEARCH_KEY` | *(empty)* | ⬜ optional |
 | `SERPAPI_KEY` | *(empty)* | ⬜ optional |
 
@@ -136,13 +136,28 @@ service that returns pages containing it.
 - **Effect:** `run_pipeline.py --image face.jpg` works with **no `--query`**
 - **Why Bing:** it accepts the image **binary**, so it works on a local file
 
+#### `SERPER_API_KEY` — Google Lens via Serper.dev (cheapest route)
+
+Fronts Google Lens and accepts the image inline as a base64 data URI, so a local
+photo works with no hosting step.
+
+- **Get it:** <https://serper.dev> — **2,500 free queries, no credit card**
+- **Set:**
+  ```ini
+  REVERSE_IMAGE_PROVIDER=serper
+  SERPER_API_KEY=<your key>
+  ```
+
 #### `SERPAPI_KEY` — Google Lens
 
 - **Get it:** <https://serpapi.com> → Dashboard → API Key
 - **Set:** `REVERSE_IMAGE_PROVIDER=serpapi` and `SERPAPI_KEY=<key>`
-- **Limitation:** Google Lens requires a *publicly reachable image URL*. It
-  cannot be handed a local photo, so it is skipped for local scans with a logged
-  reason. **Use Bing for local files.**
+- **Local photos work.** The image is POSTed to `serpapi.com/image` first,
+  which returns an `image_id` the Lens search accepts — no public hosting needed.
+- **Upload size cap:** SerpAPI rejects large posts with a bare `400`. The probe
+  is auto-cropped to the face plus context and compressed under ~460 KB before
+  upload (`prepare_probe_image()`), which also improves Lens accuracy by keeping
+  the face the dominant subject.
 
 #### `ETHERSCAN_API_KEY` — Sepolia source verification
 
@@ -496,12 +511,36 @@ vector. 100% happens only when an image is compared with the byte-identical
 file. A same-person score in the 70-85% band is exactly what correct behaviour
 looks like.
 
-### Do not tune the threshold
+### The threshold is adjustable - and audited
 
-If a genuine pair fails, fix it upstream: better lighting, a more frontal photo,
-a larger face in frame. Widening the threshold buys false accepts, and
-`tests.test_recognition` TEST 2 will start failing — which is precisely what
-that test is for.
+The slider defaults to SFace's published operating point (1.128); the operator
+can move it between 0.40 and 1.50. Two safeguards keep that honest:
+
+- The UI warns in amber whenever the value is above the default, and states that
+  different people typically land at L2 1.20-1.45.
+- **The threshold actually used is written into the canonical record that gets
+  SHA-256 hashed and committed on-chain.** A run at a widened threshold is
+  permanently distinguishable from one at the default.
+
+If a genuine pair fails, prefer fixing it upstream - better lighting, a more
+frontal photo, a larger face in frame, or manual face selection below. Widening
+buys false accepts, and `tests.test_recognition` TEST 2 will start failing,
+which is precisely what that test is for.
+
+### Manual face selection
+
+When the detector frames a photo differently from the operator - a group shot,
+or a small/off-centre face that loses on area - two overrides are accepted by
+`POST /api/social/search-and-verify`:
+
+| Field | Meaning |
+|---|---|
+| `crop_region` | `{left, top, right, bottom}` in **original** image pixels. Detection runs inside this box, so you can point at which person to search with. |
+| `face_index` | Which detected face to use, ordered largest first. |
+
+Boxes are always returned in original image coordinates, so an overlay drawn on
+the uploaded picture still lines up after a manual crop.
+
 
 ---
 
@@ -846,6 +885,24 @@ offers this. The keyless path is text-seeded discovery with the face check
 gating every result. The task explicitly permits *"a scripted search approach"*,
 but this is weaker than true reverse-image search and is documented as such
 rather than dressed up.
+
+**Reverse image search only finds photos that are already published and
+indexed.** This is the single most important limitation and it is not a bug that
+can be fixed in code. Google Lens matches your face against pages a crawler has
+already visited. If no photo of you is on a public, crawlable page, there is
+nothing to match and the honest answer is "no match". This is why results appear
+for public figures and for people with widely-shared posts, and not for ordinary
+private individuals. FaceCheck.ID appears to do better only because it built and
+operates its own crawled index of billions of faces - that index *is* the
+product, and it cannot be reproduced from an API.
+
+**GitHub profile pictures are handled separately.** Avatars are usually not in
+Lens's index, so a handle or profile URL in the hint field is resolved directly
+against `api.github.com` and the avatar is face-checked like any other
+candidate. LinkedIn, Instagram and Facebook are deliberately **not** attempted:
+their profile media sits behind a login wall and scraping it would breach their
+terms. To verify against one of those, download your own picture and use tab
+`02` 1-to-1 verification.
 
 **The system will not find a private individual.** If you are not in a public
 web index, the correct answer is `NO MATCH FOUND`, and that is what it returns.

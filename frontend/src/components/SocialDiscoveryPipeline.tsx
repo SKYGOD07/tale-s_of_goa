@@ -1,11 +1,19 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
+import { FaceRegionSelector, CropRegion } from './FaceRegionSelector';
+import { LearningPanel } from './LearningPanel';
 import {
   runSocialSearchPipeline,
   getSearchCapabilities,
+  submitFeedback,
+  teachIdentity,
+  detectFace,
   SocialSearchPipelineResponse,
   SearchCapabilities,
+  MatchResult,
+  FaceBox,
+  TeachResult,
 } from '../services/api';
 
 const MATCH_THRESHOLD = 1.128;
@@ -41,6 +49,131 @@ export function SocialDiscoveryPipeline() {
   const [loading, setLoading] = useState<boolean>(false);
   const [stepState, setStepState] = useState<number>(0);
   const [result, setResult] = useState<SocialSearchPipelineResponse | null>(null);
+  // Operator-adjustable; seeded from SFace's published operating point.
+  const [threshold, setThreshold] = useState<number>(MATCH_THRESHOLD);
+  // Operator judgement per result URL, so each card reflects what was sent.
+  const [judged, setJudged] = useState<Record<string, 'correct' | 'incorrect'>>({});
+  // Incremented after each label so LearningPanel re-reads the stats.
+  const [feedbackTick, setFeedbackTick] = useState(0);
+  // Written justification for the primary result, and where it landed.
+  const [review, setReview] = useState('');
+  const [anchorReview, setAnchorReview] = useState(true);
+  const [teaching, setTeaching] = useState(false);
+  const [taught, setTaught] = useState<TeachResult | null>(null);
+  const [teachError, setTeachError] = useState('');
+
+  /** Send the written review so the system verifies it and remembers. */
+  const teach = async () => {
+    if (!inputImage || !review.trim()) return;
+    setTeaching(true); setTeachError(''); setTaught(null);
+    try {
+      const r = await teachIdentity(inputImage, review, '', authorizedUse);
+      setTaught(r);
+    } catch (e) {
+      setTeachError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setTeaching(false);
+    }
+  };
+
+  const [reviewChain, setReviewChain] = useState<{
+    review_sha256?: string;
+    transaction_hash?: string;
+    block_number?: number;
+    simulated?: boolean;
+  } | null>(null);
+  // Manual face targeting. cropRegion wins when set; otherwise faceIndex picks
+  // among the auto-detected faces.
+  const [cropRegion, setCropRegion] = useState<CropRegion | null>(null);
+  const [faceIndex, setFaceIndex] = useState<number>(0);
+  const [detectedFaces, setDetectedFaces] = useState<FaceBox[]>([]);
+  const [scanDims, setScanDims] = useState({ width: 0, height: 0 });
+
+
+  // Show the operator what the detector found, so choosing a different face is
+  // a click rather than guesswork.
+  useEffect(() => {
+    // Every per-image judgement resets when the photo changes. Otherwise the
+    // previous subject's review, enrolment result and correct/wrong marks stay
+    // on screen and get submitted against the new face.
+    setReview('');
+    setTaught(null);
+    setTeachError('');
+    setReviewChain(null);
+    setJudged({});
+    setCropRegion(null);
+    setFaceIndex(0);
+
+    if (!inputImage) {
+      setDetectedFaces([]);
+      return;
+    }
+    let cancelled = false;
+    detectFace(inputImage)
+      .then((r) => {
+        if (cancelled) return;
+        setDetectedFaces(r.faces || []);
+        setScanDims({ width: r.image_width || 0, height: r.image_height || 0 });
+      })
+      .catch(() => { if (!cancelled) setDetectedFaces([]); });
+    return () => { cancelled = true; };
+  }, [inputImage]);
+
+
+  /** The headline result, shaped like a grid card so one judge() serves both. */
+  const primaryAsMatch = (): MatchResult | null => {
+    if (!result || result.match_found === false) return null;
+    return {
+      url: result.discovered_post.url,
+      platform: result.discovered_post.platform,
+      author: result.discovered_post.author,
+      title: result.discovered_post.title,
+      image_url: result.discovered_post.image_url,
+      face_crop_base64: result.discovered_post.post_face_crop_base64,
+      media_sha256: (result.discovered_post as { media_sha256?: string }).media_sha256,
+      discovery_source: (result.discovered_post as { discovery_source?: string }).discovery_source,
+      similarity_percentage: result.metrics.similarity_percentage,
+      euclidean_distance: result.metrics.euclidean_distance,
+      cosine_similarity: result.metrics.cosine_similarity,
+      faces_found: 1,
+    };
+  };
+
+  const judge = async (m: MatchResult, label: 'correct' | 'incorrect') => {
+    setJudged((prev) => ({ ...prev, [m.url]: label }));
+    try {
+      const res = await submitFeedback({
+        label,
+        euclidean_distance: m.euclidean_distance,
+        cosine_similarity: m.cosine_similarity,
+        threshold_used: threshold,
+        system_verdict: true,
+        page_url: m.url,
+        platform: m.platform,
+        discovery_source: m.discovery_source,
+        media_sha256: m.media_sha256,
+        record_hash: result?.record_hash || '',
+        note: review,
+        commit_on_chain: anchorReview,
+        // Scopes a rejection to this face: the same image may legitimately be
+        // the right answer for somebody else.
+        probe_embedding: result?.input_face?.embedding,
+      });
+      setFeedbackTick((n) => n + 1);
+      const rec = (res as { recorded?: Record<string, unknown> })?.recorded;
+      if (rec) {
+        const chain = (rec.chain || {}) as Record<string, unknown>;
+        setReviewChain({
+          review_sha256: rec.review_sha256 as string | undefined,
+          transaction_hash: chain.transaction_hash as string | undefined,
+          block_number: chain.block_number as number | undefined,
+          simulated: chain.simulated as boolean | undefined,
+        });
+      }
+    } catch (e) {
+      console.error('[feedback]', e);
+    }
+  };
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -76,6 +209,14 @@ export function SocialDiscoveryPipeline() {
     setLoading(true);
     setErrorMsg(null);
     setResult(null);
+    // A run produces a new result, so every judgement about the previous one is
+    // stale. Carrying the old review over would attach it to a different match
+    // and, if anchored, put the wrong justification on-chain.
+    setReview('');
+    setTaught(null);
+    setTeachError('');
+    setReviewChain(null);
+    setJudged({});
     setStepState(1); // Face encoding
 
     try {
@@ -85,8 +226,10 @@ export function SocialDiscoveryPipeline() {
       const data = await runSocialSearchPipeline(
         inputImage,
         searchQuery,
-        MATCH_THRESHOLD,
+        threshold,
         authorizedUse,
+        cropRegion,
+        faceIndex,
       );
 
       if (!data.success) {
@@ -147,43 +290,51 @@ export function SocialDiscoveryPipeline() {
           <h3 style={{ margin: 0, fontSize: '1.1rem', color: '#d3e3bb', display: 'flex', alignItems: 'center', gap: '0.5rem' }}> Step 1: Input Face Scan
           </h3>
 
-          <div
-            onClick={() => fileInputRef.current?.click()}
-            style={{
-              height: '240px',
-              border: '2px dashed rgba(211, 227, 187, 0.35)',
-              borderRadius: '12px',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer',
-              overflow: 'hidden',
-              background: 'rgba(32, 36, 26, 0.40)',
-              position: 'relative',
-            }}
-          >
-            {inputImage ? (
-              <img
-                src={inputImage}
-                alt="Input Face"
-                style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-              />
-            ) : (
+          {inputImage ? (
+            /* Once a photo is loaded the panel becomes interactive: the operator
+               can click one of the detected faces or drag a box, instead of
+               being stuck with whichever face won on area. */
+            <FaceRegionSelector
+              imageSrc={inputImage}
+              detectedFaces={detectedFaces}
+              imageWidth={scanDims.width}
+              imageHeight={scanDims.height}
+              value={cropRegion}
+              onChange={setCropRegion}
+              faceIndex={faceIndex}
+              onFaceIndexChange={setFaceIndex}
+            />
+          ) : (
+            <div
+              onClick={() => fileInputRef.current?.click()}
+              style={{
+                height: '240px',
+                border: '2px dashed rgba(211, 227, 187, 0.35)',
+                borderRadius: '12px',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                overflow: 'hidden',
+                background: 'rgba(32, 36, 26, 0.40)',
+                position: 'relative',
+              }}
+            >
               <div style={{ textAlign: 'center', padding: '1rem' }}>
                 <span style={{ fontSize: '0.95rem', color: 'rgba(255,255,255,0.86)', fontWeight: 400 }}>Click to Upload Face Scan</span>
                 <span style={{ display: 'block', fontSize: '0.8rem', color: 'rgba(255,255,255,0.62)', marginTop: '0.25rem' }}> Supports JPEG, PNG (Webcam snapshot or photo)
                 </span>
               </div>
-            )}
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={handleFileUpload}
-              accept="image/*"
-              style={{ display: 'none' }}
-            />
-          </div>
+            </div>
+          )}
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileUpload}
+            accept="image/*"
+            style={{ display: 'none' }}
+          />
 
           <div style={{ display: 'flex', gap: '0.5rem' }}>
             <button
@@ -272,6 +423,12 @@ export function SocialDiscoveryPipeline() {
                     The face image itself is sent to the visual-search provider, so no
                     name or keyword is needed. Every candidate returned is then
                     re-detected, embedded and compared against your scan.
+                    {' '}<strong style={{ color: '#e8c46a' }}>Note:</strong> Google Lens ranks
+                    on overall visual similarity, not face identity &mdash; it will return
+                    look-alikes and people wearing similar glasses or headphones. The face
+                    check filters those out, but it cannot make Lens retrieve someone it
+                    never indexed. To reliably re-find a specific person, teach the system
+                    their identity below.
                   </>
                 ) : caps?.live_search_available ? (
                   <>
@@ -302,25 +459,57 @@ export function SocialDiscoveryPipeline() {
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'rgba(255,255,255,0.62)', marginBottom: '0.25rem' }}>
                 <span>Match Threshold (L₂ distance)</span>
-                <span style={{ color: '#d3e3bb', fontWeight: 400 }}>{MATCH_THRESHOLD.toFixed(3)}</span>
+                <span style={{
+                  color: threshold > MATCH_THRESHOLD ? '#e8c46a' : '#d3e3bb',
+                  fontWeight: 400,
+                }}>
+                  {threshold.toFixed(3)}
+                  {Math.abs(threshold - MATCH_THRESHOLD) < 0.001 && ' (default)'}
+                </span>
               </div>
               <input
                 type="range"
-                min="0.60"
-                max="1.40"
-                step="0.05"
-                value={MATCH_THRESHOLD}
-                disabled
-                style={{ width: '100%', accentColor: '#d3e3bb', opacity: 0.55 }}
+                min="0.40"
+                max="1.50"
+                step="0.01"
+                value={threshold}
+                onChange={(e) => setThreshold(parseFloat(e.target.value))}
+                style={{ width: '100%', accentColor: threshold > MATCH_THRESHOLD ? '#e8c46a' : '#d3e3bb' }}
               />
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: 'rgba(255,255,255,0.44)', marginTop: '0.2rem' }}>
-                <span>Strict (0.60)</span>
-                <span>Balanced (1.00)</span>
-                <span>Permissive (1.40)</span>
+                <span>Strict (0.40)</span>
+                <span>SFace default (1.128)</span>
+                <span>Permissive (1.50)</span>
               </div>
               <p style={{ margin: '0.4rem 0 0', fontSize: '0.72rem', color: 'rgba(255,255,255,0.44)', lineHeight: 1.5 }}>
-                Locked at the SFace operating point. The decision boundary cannot be widened to force a match.
+                {threshold > MATCH_THRESHOLD ? (
+                  <span style={{ color: '#e8c46a' }}>
+                    Above the published SFace operating point ({MATCH_THRESHOLD}). This accepts
+                    weaker matches and will admit false positives &mdash; different people
+                    typically land at L₂ 1.20&ndash;1.45. The value used is written into the
+                    canonical record that is hashed on-chain, so it stays auditable.
+                  </span>
+                ) : threshold < MATCH_THRESHOLD ? (
+                  <>Stricter than the SFace default ({MATCH_THRESHOLD}). Fewer false positives,
+                  more genuine matches rejected.</>
+                ) : (
+                  <>SFace&rsquo;s published operating point. Validated against same-person and
+                  different-person pairs; changing it is recorded on-chain.</>
+                )}
               </p>
+              {threshold !== MATCH_THRESHOLD && (
+                <button
+                  onClick={() => setThreshold(MATCH_THRESHOLD)}
+                  style={{
+                    marginTop: '0.4rem', background: 'transparent',
+                    border: '1px solid var(--rule-strong)', color: 'rgba(255,255,255,0.62)',
+                    borderRadius: '6px', padding: '0.25rem 0.6rem',
+                    fontSize: '0.7rem', cursor: 'pointer', fontFamily: 'inherit',
+                  }}
+                >
+                  Reset to default ({MATCH_THRESHOLD})
+                </button>
+              )}
             </div>
 
             {/* The hint is only genuinely optional when a reverse-image
@@ -563,6 +752,12 @@ export function SocialDiscoveryPipeline() {
             );
           })()}
 
+          <LearningPanel
+            refreshKey={feedbackTick}
+            currentThreshold={threshold}
+            onApplyThreshold={setThreshold}
+          />
+
           {result.diagnostics?.search && (
             <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.44)' }}>
               <div style={{ marginBottom: '0.5rem' }}>
@@ -590,6 +785,182 @@ export function SocialDiscoveryPipeline() {
 
       {result && result.match_found !== false && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          {/* RECOGNISED FROM MEMORY. This is checked before any web lookup and
+              is the only mechanism that reliably re-identifies a specific
+              person: reverse image search retrieves on overall visual
+              similarity, so it returns look-alikes and matching accessories,
+              not necessarily the same face. */}
+          {result.known_identity && (
+            <div style={{
+              background: 'rgba(20, 23, 16, 0.85)',
+              border: '1px solid rgba(127,214,162,0.45)',
+              borderRadius: '16px', padding: '1.5rem',
+              display: 'flex', gap: '1rem', alignItems: 'flex-start', flexWrap: 'wrap',
+            }}>
+              {result.known_identity.thumbnail && (
+                <img src={result.known_identity.thumbnail} alt=""
+                     style={{ width: 72, height: 72, borderRadius: '10px', objectFit: 'cover',
+                              border: '1px solid rgba(127,214,162,0.4)' }} />
+              )}
+              <div style={{ flex: 1, minWidth: 240 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+                  <span className="tag tag--live">Known identity</span>
+                  <h3 style={{ margin: 0, fontSize: '1.15rem', color: '#f4f6f0' }}>
+                    {result.known_identity.name}
+                  </h3>
+                  <span className="mono" style={{ fontSize: '0.78rem', color: '#a9e3b4' }}>
+                    {result.known_identity.similarity_percentage?.toFixed(1)}% &middot;
+                    L2 {result.known_identity.euclidean_distance?.toFixed(4)}
+                  </span>
+                </div>
+                <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.62)', marginTop: '0.35rem', lineHeight: 1.6 }}>
+                  Recognised from {result.known_identity.reference_count} enrolled reference
+                  photo{result.known_identity.reference_count === 1 ? '' : 's'} &mdash; matched via{' '}
+                  <span style={{ color: '#d3e3bb' }}>{result.known_identity.matched_origin}</span>.
+                  This came from memory, not from the web search below.
+                </div>
+                {result.known_identity.source_urls?.length > 0 && (
+                  <div style={{ marginTop: '0.4rem', display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
+                    {result.known_identity.source_urls.map((u, i) => (
+                      <a key={i} href={u} target="_blank" rel="noreferrer"
+                         style={{ fontSize: '0.73rem', color: 'rgba(255,255,255,0.62)',
+                                  borderBottom: '1px solid var(--rule-strong)',
+                                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {u}
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {result.gallery && !result.known_identity && result.gallery.enrolled_identities > 0 && (
+            <div style={{
+              background: 'var(--surface-sunken)', border: '1px solid var(--rule)',
+              borderRadius: '10px', padding: '0.75rem 1rem',
+              fontSize: '0.75rem', color: 'rgba(255,255,255,0.44)',
+            }}>
+              Checked against {result.gallery.enrolled_identities} enrolled
+              identit{result.gallery.enrolled_identities === 1 ? 'y' : 'ies'}
+              {' '}({result.gallery.enrolled_faces} reference faces) &mdash; no match from memory.
+            </div>
+          )}
+
+          <LearningPanel
+            refreshKey={feedbackTick}
+            currentThreshold={threshold}
+            onApplyThreshold={setThreshold}
+          />
+
+          {/* ALL PASSING MATCHES. A face search legitimately returns the same
+              person across several pages; showing only the single best hides
+              most of the evidence. Each card carries its own score and source,
+              plus a correct/incorrect control that feeds threshold calibration. */}
+          {result.all_matches && result.all_matches.length > 1 && (
+            <div
+              style={{
+                background: 'rgba(20, 23, 16, 0.85)',
+                border: '1px solid var(--rule-strong)',
+                borderRadius: '16px',
+                padding: '1.5rem',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.75rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
+                <h3 style={{ margin: 0, fontSize: '1.1rem', color: '#f4f6f0' }}>
+                  {result.all_matches.length} matching results
+                </h3>
+                <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.44)' }}>
+                  all passed L2 &le; {threshold.toFixed(3)} &middot; best first &middot; mark each to train the threshold
+                </span>
+              </div>
+
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))',
+                gap: '0.9rem',
+              }}>
+                {result.all_matches.map((m, i) => {
+                  const verdict = judged[m.url];
+                  const borderColor = verdict === 'correct'
+                    ? 'rgba(127,214,162,0.5)'
+                    : verdict === 'incorrect'
+                      ? 'rgba(224,133,133,0.5)'
+                      : 'var(--rule)';
+                  return (
+                    <div key={m.url + i} style={{
+                      background: 'var(--surface-sunken)',
+                      border: '1px solid ' + borderColor,
+                      borderRadius: '10px',
+                      overflow: 'hidden',
+                      display: 'flex',
+                      flexDirection: 'column',
+                    }}>
+                      <img
+                        src={m.face_crop_base64 || m.image_url}
+                        alt=""
+                        style={{ width: '100%', height: '150px', objectFit: 'cover', background: '#12140f' }}
+                      />
+                      <div style={{ padding: '0.6rem', display: 'flex', flexDirection: 'column', gap: '0.35rem', flex: 1 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: '0.7rem', color: '#d3e3bb' }}>{m.platform}</span>
+                          <span className="mono" style={{ fontSize: '0.7rem', color: '#a9e3b4' }}>
+                            {m.similarity_percentage?.toFixed(1)}%
+                          </span>
+                        </div>
+                        <div className="mono" style={{ fontSize: '0.68rem', color: 'rgba(255,255,255,0.44)' }}>
+                          L2 {m.euclidean_distance?.toFixed(4)}
+                        </div>
+                        <a href={m.url} target="_blank" rel="noreferrer"
+                           style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.62)',
+                                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                                    borderBottom: '1px solid var(--rule-strong)' }}>
+                          {m.title || m.url}
+                        </a>
+
+                        <div style={{ display: 'flex', gap: '0.3rem', marginTop: 'auto', paddingTop: '0.4rem' }}>
+                          <button
+                            onClick={() => judge(m, 'correct')}
+                            disabled={!!verdict}
+                            style={{
+                              flex: 1, fontSize: '0.68rem', padding: '0.3rem',
+                              borderRadius: '5px', cursor: verdict ? 'default' : 'pointer',
+                              border: '1px solid rgba(127,214,162,0.4)',
+                              background: verdict === 'correct' ? 'rgba(127,214,162,0.25)' : 'transparent',
+                              color: '#a9e3b4', fontFamily: 'inherit',
+                            }}
+                          >
+                            {verdict === 'correct' ? 'Correct' : 'Correct'}
+                          </button>
+                          <button
+                            onClick={() => judge(m, 'incorrect')}
+                            disabled={!!verdict}
+                            style={{
+                              flex: 1, fontSize: '0.68rem', padding: '0.3rem',
+                              borderRadius: '5px', cursor: verdict ? 'default' : 'pointer',
+                              border: '1px solid rgba(224,133,133,0.4)',
+                              background: verdict === 'incorrect' ? 'rgba(224,133,133,0.25)' : 'transparent',
+                              color: '#e89a9a', fontFamily: 'inherit',
+                            }}
+                          >
+                            {verdict === 'incorrect' ? 'Not them' : 'Not them'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <p style={{ margin: '0.9rem 0 0', fontSize: '0.72rem', color: 'rgba(255,255,255,0.44)', lineHeight: 1.5 }}>
+                Labels are appended to <code>backend/data/feedback.jsonl</code> &mdash; distances and
+                verdicts only, never images or embeddings. Analyse them with
+                <code> backend/notebooks/threshold_calibration.ipynb</code> to derive a threshold from
+                your own data.
+              </p>
+            </div>
+          )}
+
           {/* SECTION: DISCOVERED SOCIAL MEDIA POST */}
           <div
             style={{
@@ -620,6 +991,190 @@ export function SocialDiscoveryPipeline() {
               >
                 {result.metrics.is_match ? 'MATCH CONFIRMED' : 'MISMATCH'} ({result.metrics.similarity_percentage}%)
               </span>
+            </div>
+
+            {/* Feedback on the primary result. Previously this only existed in
+                the multi-result grid, so a search returning a single match gave
+                the operator nowhere to say whether it was right - and the
+                calibration set never grew. */}
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: '0.75rem',
+              flexWrap: 'wrap', padding: '0.75rem 0',
+              borderTop: '1px solid var(--rule)', borderBottom: '1px solid var(--rule)',
+              marginBottom: '1.25rem',
+            }}>
+              <span style={{ fontSize: '0.8rem', color: '#f4f6f0' }}>
+                Is this the right person?
+              </span>
+              <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.44)', flex: 1, minWidth: '200px' }}>
+                Your answer is added to the calibration set - it is how the threshold
+                learns from your photos rather than staying at a generic default.
+              </span>
+              {(() => {
+                const primary = primaryAsMatch();
+                const verdict = primary ? judged[primary.url] : undefined;
+                return (
+                  <div style={{ display: 'flex', gap: '0.4rem' }}>
+                    <button
+                      onClick={() => primary && judge(primary, 'correct')}
+                      disabled={!primary || !!verdict}
+                      style={{
+                        padding: '0.4rem 0.9rem', borderRadius: '6px', fontSize: '0.78rem',
+                        cursor: verdict ? 'default' : 'pointer', fontFamily: 'inherit',
+                        border: '1px solid rgba(127,214,162,0.45)',
+                        background: verdict === 'correct' ? 'rgba(127,214,162,0.28)' : 'transparent',
+                        color: '#a9e3b4',
+                      }}
+                    >
+                      {verdict === 'correct' ? 'Marked correct' : 'Correct'}
+                    </button>
+                    <button
+                      onClick={() => primary && judge(primary, 'incorrect')}
+                      disabled={!primary || !!verdict}
+                      style={{
+                        padding: '0.4rem 0.9rem', borderRadius: '6px', fontSize: '0.78rem',
+                        cursor: verdict ? 'default' : 'pointer', fontFamily: 'inherit',
+                        border: '1px solid rgba(224,133,133,0.45)',
+                        background: verdict === 'incorrect' ? 'rgba(224,133,133,0.28)' : 'transparent',
+                        color: '#e89a9a',
+                      }}
+                    >
+                      {verdict === 'incorrect' ? 'Marked wrong' : 'Not this person'}
+                    </button>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Written review. Anchoring hashes the wording itself, so the
+                judgement cannot later be quietly rewritten and still match
+                what the chain holds. */}
+            <div style={{ marginBottom: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <label htmlFor="review-text" style={{ fontSize: '0.78rem', color: '#f4f6f0' }}>
+                Written review <span style={{ color: 'rgba(255,255,255,0.44)' }}>(optional)</span>
+              </label>
+              <textarea
+                id="review-text"
+                value={review}
+                onChange={(e) => setReview(e.target.value)}
+                maxLength={2000}
+                rows={3}
+                placeholder="Why is this right or wrong? e.g. 'Same person - matching mole under left eye, same jawline.' or 'Different person - similar hairstyle only.'"
+                style={{
+                  width: '100%', boxSizing: 'border-box',
+                  background: '#171a13', border: '1px solid #2c3125',
+                  color: '#f4f6f0', borderRadius: '8px',
+                  padding: '0.6rem 0.75rem', fontSize: '0.8rem',
+                  fontFamily: 'inherit', lineHeight: 1.5, resize: 'vertical',
+                  outline: 'none',
+                }}
+              />
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', color: 'rgba(255,255,255,0.62)', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={anchorReview}
+                    onChange={(e) => setAnchorReview(e.target.checked)}
+                  />
+                  Anchor this review on the blockchain
+                </label>
+                <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.44)' }}>
+                  {review.length}/2000 &middot; write it first, then press Correct or Not this person
+                </span>
+              </div>
+
+              {/* Teaching is different from labelling. A label tunes the
+                  threshold; this enrols an identity so the face is recognised
+                  directly next time, without depending on a search engine. */}
+              <div style={{
+                background: 'var(--surface-sunken)',
+                border: '1px solid var(--rule)',
+                borderRadius: '8px', padding: '0.75rem',
+                display: 'flex', flexDirection: 'column', gap: '0.5rem',
+              }}>
+                <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <button
+                    onClick={teach}
+                    disabled={teaching || !review.trim() || !authorizedUse}
+                    style={{
+                      background: review.trim() && authorizedUse
+                        ? 'linear-gradient(135deg, #8fa877 0%, #6f8a55 100%)' : 'transparent',
+                      color: review.trim() && authorizedUse ? '#12140f' : 'rgba(255,255,255,0.35)',
+                      border: review.trim() && authorizedUse ? 'none' : '1px solid var(--rule-strong)',
+                      borderRadius: '8px', padding: '0.45rem 1rem',
+                      fontSize: '0.8rem', fontWeight: 500,
+                      cursor: teaching || !review.trim() || !authorizedUse ? 'default' : 'pointer',
+                      fontFamily: 'inherit',
+                    }}
+                  >
+                    {teaching ? 'Verifying the claim...' : 'Teach the system this identity'}
+                  </button>
+                  <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.44)', flex: 1, minWidth: 200 }}>
+                    Put profile links in the review. Each one is fetched and face-checked
+                    before anything is remembered.
+                  </span>
+                </div>
+
+                {teachError && (
+                  <div style={{ fontSize: '0.75rem', color: '#e89a9a' }}>{teachError}</div>
+                )}
+
+                {taught && (
+                  <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.62)', lineHeight: 1.7 }}>
+                    <div style={{ color: '#a9e3b4', marginBottom: '0.3rem' }}>
+                      Learned &ldquo;{taught.identity}&rdquo; &mdash; {taught.enrolled_faces} reference
+                      face{taught.enrolled_faces === 1 ? '' : 's'} stored
+                      ({taught.verified_count} verified, {taught.unverified_count} unverified,
+                      {' '}{taught.rejected_count} rejected)
+                    </div>
+                    {taught.references.map((r, i) => (
+                      <div key={i} style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                        <span style={{
+                          color: r.status === 'verified' ? '#a9e3b4'
+                            : r.status === 'rejected' ? '#e89a9a' : '#e8c46a',
+                          minWidth: 74,
+                        }}>
+                          {r.status}
+                        </span>
+                        <span style={{ flex: 1, minWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {r.url}
+                        </span>
+                        {r.euclidean_distance != null && (
+                          <span className="mono" style={{ color: '#d3e3bb' }}>
+                            L2 {r.euclidean_distance.toFixed(4)}
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                    <div style={{ marginTop: '0.4rem', color: 'rgba(255,255,255,0.44)' }}>
+                      Next time this face is searched it is recognised from memory first,
+                      before any web lookup. Teach it again with other photos of the same
+                      person to cover different ages and lighting.
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {reviewChain && (
+                <div style={{
+                  background: 'var(--surface-sunken)',
+                  border: '1px solid ' + (reviewChain.simulated ? 'rgba(232,196,106,0.35)' : 'rgba(127,214,162,0.35)'),
+                  borderRadius: '8px', padding: '0.6rem 0.75rem',
+                  fontSize: '0.72rem', color: 'rgba(255,255,255,0.62)', lineHeight: 1.7,
+                }}>
+                  <div style={{ color: reviewChain.simulated ? '#e8c46a' : '#a9e3b4', marginBottom: '0.2rem' }}>
+                    {reviewChain.simulated ? 'Review recorded (SIMULATED - not broadcast)' : 'Review anchored on-chain'}
+                  </div>
+                  <div className="mono" style={{ wordBreak: 'break-all' }}>
+                    review SHA-256: {reviewChain.review_sha256}
+                  </div>
+                  {reviewChain.transaction_hash && (
+                    <div className="mono" style={{ wordBreak: 'break-all' }}>
+                      tx: {reviewChain.transaction_hash} &middot; block #{reviewChain.block_number}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr', gap: '1.5rem' }}>

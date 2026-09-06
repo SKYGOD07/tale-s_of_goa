@@ -461,23 +461,76 @@ def evaluate_face_similarity(
 # Convenience: image -> single best face embedding
 # ─────────────────────────────────────────────────────────────────────────
 
-def embed_primary_face(image_bgr: np.ndarray) -> Dict[str, Any]:
+def embed_primary_face(
+    image_bgr: np.ndarray,
+    face_index: int = 0,
+    crop_region: Optional[Dict[str, int]] = None,
+) -> Dict[str, Any]:
     """
-    Detect, align and embed the largest face in an image.
+    Detect, align and embed a face in an image.
 
     The one entry point used by the comparison, registration and web-discovery
     paths, so a live frame, an uploaded photo and a downloaded candidate image
     all traverse exactly the same code.
 
+    By default the largest face is used. Two manual overrides exist for photos
+    the detector reads differently from the operator:
+
+      crop_region  {left, top, right, bottom} in ORIGINAL image coordinates.
+                   The image is cropped to this box first, so the operator can
+                   point at one person in a group shot or at a small or off-centre face
+                   the auto-pick skipped. Detection then runs inside the crop.
+      face_index   Which detected face to use, ordered largest first. Useful
+                   when two faces are present and the wrong one wins on area.
+
+    Boxes are always reported back in ORIGINAL image coordinates, so an overlay
+    drawn against the uploaded picture still lines up after a manual crop.
+
     Raises ValueError when no face is found - callers must not substitute a
     whole-image embedding, which is not a face embedding at all.
     """
-    detections, width, height = detect_faces_detailed(image_bgr)
-    if not detections:
-        raise ValueError("No face detected in the supplied image")
+    full_h, full_w = image_bgr.shape[:2]
 
-    primary = detections[0]
-    aligned, feature = encode_face(image_bgr, primary)
+    off_x = off_y = 0
+    work = image_bgr
+    if crop_region:
+        left = max(0, min(int(crop_region.get("left", 0)), full_w - 1))
+        top = max(0, min(int(crop_region.get("top", 0)), full_h - 1))
+        right = max(left + 1, min(int(crop_region.get("right", full_w)), full_w))
+        bottom = max(top + 1, min(int(crop_region.get("bottom", full_h)), full_h))
+        work = image_bgr[top:bottom, left:right]
+        off_x, off_y = left, top
+        if work.size == 0:
+            raise ValueError("The supplied crop region is empty")
+
+    detections, _, _ = detect_faces_detailed(work)
+    if not detections:
+        raise ValueError(
+            "No face detected in the selected region"
+            if crop_region else "No face detected in the supplied image"
+        )
+
+    if not 0 <= face_index < len(detections):
+        raise ValueError(
+            f"face_index {face_index} is out of range; {len(detections)} face(s) detected"
+        )
+
+    primary = detections[face_index]
+
+    # Embed from the cropped frame (that is where the landmarks are valid),
+    # then translate the reported boxes back into original coordinates.
+    aligned, feature = encode_face(work, primary)
+    display_crop = crop_face_region(work, primary.box)
+
+    if off_x or off_y:
+        for det in detections:
+            det.box = {
+                "top": det.box["top"] + off_y,
+                "bottom": det.box["bottom"] + off_y,
+                "left": det.box["left"] + off_x,
+                "right": det.box["right"] + off_x,
+            }
+            det.landmarks = [(x + off_x, y + off_y) for (x, y) in det.landmarks]
 
     return {
         "detection": primary,
@@ -485,10 +538,12 @@ def embed_primary_face(image_bgr: np.ndarray) -> Dict[str, Any]:
         "aligned": aligned,
         "feature": feature,
         "embedding": feature_to_list(feature),
-        "display_crop": crop_face_region(image_bgr, primary.box),
-        "image_width": width,
-        "image_height": height,
+        "display_crop": display_crop,
+        "image_width": full_w,
+        "image_height": full_h,
         "face_count": len(detections),
+        "face_index": face_index,
+        "crop_region": crop_region,
     }
 
 

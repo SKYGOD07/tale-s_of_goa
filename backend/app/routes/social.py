@@ -9,6 +9,12 @@ from app.services.social_search import (
 )
 from app.services.face_processor import encode_image_to_base64, models_ready, SFACE_L2_THRESHOLD
 from app.services.face_search import search_capabilities
+from app.services.gallery import gallery_summary, delete_identity, match_gallery
+from app.services.teach import teach_identity
+from app.services.face_processor import decode_base64_image, embed_primary_face
+from app.services.feedback import (
+    record_feedback, feedback_stats, suggest_threshold, VALID_LABELS,
+)
 
 router = APIRouter(prefix="/api/social", tags=["Social Media Pipeline"])
 
@@ -19,11 +25,32 @@ class SocialSearchRequest(BaseModel):
         ...,
         description="Caller confirms they are authorized to search with this image.",
     )
-    # L2 distance. Default is SFace's published operating point; it is not a
-    # dial to widen until a particular photo passes.
+    # L2 distance. Defaults to SFace's published operating point. The operator
+    # may change it - the value actually used is recorded in the canonical
+    # record that gets hashed on-chain, so any deviation is auditable rather
+    # than hidden.
     threshold: Optional[float] = Field(
         SFACE_L2_THRESHOLD,
-        description=f"SFace L2 match threshold (default {SFACE_L2_THRESHOLD})",
+        ge=0.20, le=1.60,
+        description=(
+            f"SFace L2 match threshold (default {SFACE_L2_THRESHOLD}, the published "
+            "operating point). Lower = stricter. Raising it above the default "
+            "accepts more false matches."
+        ),
+    )
+    # Manual overrides for photos the detector frames differently from the
+    # operator: point at one person in a group shot, or pick a different face.
+    face_index: Optional[int] = Field(
+        0, ge=0, le=20,
+        description="Which detected face to use, ordered largest first.",
+    )
+    crop_region: Optional[Dict[str, int]] = Field(
+        None,
+        description=(
+            "Optional {left, top, right, bottom} in ORIGINAL image pixels. "
+            "Detection runs inside this box, so the operator can point at the "
+            "face to search with."
+        ),
     )
 
 class FetchUrlRequest(BaseModel):
@@ -44,6 +71,8 @@ async def search_and_verify_endpoint(payload: SocialSearchRequest):
         result = await run_social_search_and_verification_pipeline(
             face_input_b64=payload.image,
             search_query=payload.query or "",
+            face_index=payload.face_index or 0,
+            crop_region=payload.crop_region,
             threshold=payload.threshold or SFACE_L2_THRESHOLD,
         )
         return result
@@ -73,6 +102,126 @@ async def search_and_verify_endpoint(payload: SocialSearchRequest):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Pipeline error: {str(e)}")
+
+class FeedbackRequest(BaseModel):
+    """One operator judgement on a returned match."""
+    label: str = Field(..., description=f"One of {VALID_LABELS}")
+    euclidean_distance: float = Field(..., ge=0.0, le=2.0)
+    cosine_similarity: Optional[float] = Field(None, ge=-1.0, le=1.0)
+    threshold_used: Optional[float] = Field(None, ge=0.0, le=2.0)
+    system_verdict: Optional[bool] = Field(
+        None, description="What the pipeline decided, for agreement tracking.")
+    page_url: Optional[str] = ""
+    platform: Optional[str] = ""
+    discovery_source: Optional[str] = ""
+    media_sha256: Optional[str] = ""
+    record_hash: Optional[str] = ""
+    probe_embedding: Optional[list] = Field(
+        None, description="The searching face, so a rejection applies only to it.")
+    # Free-text justification. Stored verbatim and, when anchored, included in
+    # the hashed record so the wording itself becomes tamper-evident.
+    note: Optional[str] = Field("", max_length=2000,
+                                description="Written review explaining the judgement.")
+    commit_on_chain: Optional[bool] = Field(
+        False, description="Anchor this review's SHA-256 on the blockchain.")
+
+
+@router.post("/feedback")
+def submit_feedback(payload: FeedbackRequest):
+    """
+    Record whether a returned match was actually right.
+
+    These labels are the training set for threshold calibration. No image and
+    no embedding is stored - only the distance, the label and provenance.
+    """
+    try:
+        entry = record_feedback(
+            label=payload.label,
+            euclidean_distance=payload.euclidean_distance,
+            cosine_similarity=payload.cosine_similarity,
+            threshold_used=payload.threshold_used,
+            system_verdict=payload.system_verdict,
+            page_url=payload.page_url or "",
+            platform=payload.platform or "",
+            discovery_source=payload.discovery_source or "",
+            media_sha256=payload.media_sha256 or "",
+            record_hash=payload.record_hash or "",
+            note=payload.note or "",
+            commit_on_chain=bool(payload.commit_on_chain),
+            probe_embedding=payload.probe_embedding,
+        )
+    except ValueError as ve:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
+    return {"success": True, "recorded": entry, "stats": feedback_stats()}
+
+
+@router.get("/feedback/stats")
+def feedback_statistics():
+    """Label counts, agreement rate, and a data-driven threshold suggestion."""
+    return {"stats": feedback_stats(), "calibration": suggest_threshold()}
+
+
+class TeachRequest(BaseModel):
+    """Teach the system an identity from a written review."""
+    image: str = Field(..., description="Base64 face photo the claim is about")
+    review: str = Field(..., min_length=1, max_length=2000,
+                        description="Written review, e.g. 'this is the face of <profile url>'")
+    name: Optional[str] = Field("", description="Identity name; inferred from the profile if blank")
+    authorized_use: bool = Field(..., description="Caller confirms authorisation to enrol this face")
+
+
+@router.post("/teach")
+async def teach_endpoint(payload: TeachRequest):
+    """
+    Read the review, fetch what it cites, verify each face against the submitted
+    photo, and enrol only what actually matches.
+
+    A claim is not evidence - every supporting image passes the same biometric
+    gate as a search result, and failures are returned with the reason.
+    """
+    if not payload.authorized_use:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Enrolling a face requires the authorisation acknowledgement.",
+        )
+    try:
+        bgr = decode_base64_image(payload.image)
+        return await teach_identity(bgr, payload.review, payload.name or "")
+    except ValueError as ve:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
+
+
+@router.get("/gallery")
+def gallery_endpoint():
+    """Everything the system has been taught. Embeddings stripped."""
+    return gallery_summary()
+
+
+@router.delete("/gallery/{name}")
+def gallery_delete(name: str):
+    """Erase an enrolled identity. Biometric data must be removable on request."""
+    if delete_identity(name):
+        return {"success": True, "deleted": name, "gallery": gallery_summary()}
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"No enrolled identity named {name!r}")
+
+
+class GalleryMatchRequest(BaseModel):
+    image: str
+    threshold: Optional[float] = Field(None, ge=0.20, le=1.60)
+
+
+@router.post("/gallery/match")
+def gallery_match_endpoint(payload: GalleryMatchRequest):
+    """Check a photo against enrolled identities only - no web search."""
+    try:
+        bgr = decode_base64_image(payload.image)
+        emb = embed_primary_face(bgr)["embedding"]
+    except ValueError as ve:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
+    kwargs = {"threshold": payload.threshold} if payload.threshold else {}
+    return match_gallery(emb, **kwargs)
+
 
 @router.get("/capabilities")
 def capabilities_endpoint():

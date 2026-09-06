@@ -394,6 +394,8 @@ export interface SocialSearchPipelineResponse {
     crop_base64?: string;
     image_width: number;
     image_height: number;
+    /** The searching face, so a rejection can be scoped to it. */
+    embedding?: number[];
   };
   discovered_post: DiscoveredPost;
   metrics: PipelineMetrics;
@@ -401,6 +403,16 @@ export interface SocialSearchPipelineResponse {
   canonical_record: any;
   blockchain_upload: VerificationResponse;
   onchain_reverification: VerificationQueryResponse;
+  /** Recognised from the enrolled gallery, before any web search. */
+  known_identity?: KnownIdentity | null;
+  gallery?: {
+    enrolled_identities: number;
+    enrolled_faces: number;
+    top_scores?: KnownIdentity[];
+  };
+  /** Every candidate that passed the threshold, best first. */
+  all_matches?: MatchResult[];
+  match_count?: number;
   tamper_check?: TamperCheck;
   diagnostics?: {
     input_scan?: Record<string, any>;
@@ -414,6 +426,10 @@ export async function runSocialSearchPipeline(
   query: string = '',
   threshold: number = 1.128,
   authorizedUse: boolean = false,
+  // Manual overrides for photos the detector frames differently from the
+  // operator: point at one person, or pick a different detected face.
+  cropRegion: { left: number; top: number; right: number; bottom: number } | null = null,
+  faceIndex: number = 0,
 ): Promise<SocialSearchPipelineResponse> {
   try {
     const res = await fetch(`${API_BASE_URL}/api/social/search-and-verify`, {
@@ -424,6 +440,8 @@ export async function runSocialSearchPipeline(
         query: query,
         threshold: threshold,
         authorized_use: authorizedUse,
+        crop_region: cropRegion,
+        face_index: faceIndex,
       }),
     });
 
@@ -535,5 +553,129 @@ export interface CapabilitiesResponse {
 export async function getSearchCapabilities(): Promise<CapabilitiesResponse> {
   const res = await fetch(`${API_BASE_URL}/api/social/capabilities`);
   if (!res.ok) throw new Error(`Capabilities unavailable (${res.status})`);
+  return await res.json();
+}
+
+/** An identity the system has been taught and now recognises directly. */
+export interface KnownIdentity {
+  name: string;
+  source_urls: string[];
+  reference_count: number;
+  similarity_percentage: number;
+  euclidean_distance: number;
+  cosine_similarity: number;
+  matched_origin: string;
+  thumbnail?: string;
+  is_match: boolean;
+}
+
+/** One candidate that passed the biometric gate. */
+export interface MatchResult {
+  url: string;
+  platform: string;
+  author: string;
+  title: string;
+  image_url: string;
+  face_crop_base64?: string;
+  media_sha256?: string;
+  discovery_source?: string;
+  similarity_percentage: number;
+  euclidean_distance: number;
+  cosine_similarity: number;
+  faces_found: number;
+}
+
+export interface FeedbackPayload {
+  label: 'correct' | 'incorrect' | 'unsure';
+  euclidean_distance: number;
+  cosine_similarity?: number;
+  threshold_used?: number;
+  system_verdict?: boolean;
+  page_url?: string;
+  platform?: string;
+  discovery_source?: string;
+  media_sha256?: string;
+  record_hash?: string;
+  /** Free-text justification, stored verbatim. */
+  note?: string;
+  /** Anchor this review's SHA-256 on the blockchain. */
+  commit_on_chain?: boolean;
+  /** The searching face, so a rejection applies only to it. */
+  probe_embedding?: number[];
+}
+
+export interface FeedbackStats {
+  stats: {
+    total: number; correct: number; incorrect: number; unsure: number;
+    agreement_rate: number | null; path: string;
+  };
+  calibration: {
+    samples: number; same_person: number; different_person: number;
+    suggested_threshold: number | null; balanced_accuracy: number | null;
+    published_default: number; confident: boolean; message: string;
+  };
+}
+
+/** Record whether a returned match was actually the right person. */
+export async function submitFeedback(payload: FeedbackPayload) {
+  const res = await fetch(`${API_BASE_URL}/api/social/feedback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(`Feedback failed (${res.status})`);
+  return await res.json();
+}
+
+export async function getFeedbackStats(): Promise<FeedbackStats> {
+  const res = await fetch(`${API_BASE_URL}/api/social/feedback/stats`);
+  if (!res.ok) throw new Error(`Stats unavailable (${res.status})`);
+  return await res.json();
+}
+
+export interface TeachReference {
+  url: string;
+  platform: string;
+  status: 'verified' | 'unverified' | 'rejected' | 'skipped' | 'error';
+  reason?: string;
+  similarity_percentage?: number;
+  euclidean_distance?: number;
+  image_url?: string;
+}
+
+export interface TeachResult {
+  success: boolean;
+  identity: string;
+  enrolled_faces: number;
+  added_now: number;
+  references: TeachReference[];
+  verified_count: number;
+  unverified_count: number;
+  rejected_count: number;
+  threshold_used: number;
+}
+
+/**
+ * Teach the system an identity from a written review. Whatever the review
+ * cites is fetched and face-checked against the photo before anything is
+ * stored - a claim on its own is never enough.
+ */
+export async function teachIdentity(
+  imageBase64: string,
+  review: string,
+  name: string = '',
+  authorizedUse: boolean = false,
+): Promise<TeachResult> {
+  const res = await fetch(`${API_BASE_URL}/api/social/teach`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      image: imageBase64, review, name, authorized_use: authorizedUse,
+    }),
+  });
+  if (!res.ok) {
+    const t = await res.text().catch(() => res.statusText);
+    throw new Error(t || `Teach failed (${res.status})`);
+  }
   return await res.json();
 }
