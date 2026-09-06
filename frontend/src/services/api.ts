@@ -506,3 +506,28 @@ export async function getChainStatus(): Promise<ChainStatus> {
   }
   return await res.json();
 }
+
+export interface SearchCapabilities {
+  reverse_image_search?: string | null;
+  reverse_image_available: boolean;
+  live_search_available: boolean;
+  live_search_engine?: string | null;
+  mode: 'reverse_image' | 'live_scripted' | 'unavailable';
+}
+
+export interface CapabilitiesResponse {
+  models: Record<string, unknown>;
+  search: SearchCapabilities;
+}
+
+/**
+ * Which discovery mechanism is actually available right now. The UI must
+ * describe what the backend can really do - promising "no keyword needed"
+ * when no reverse-image provider is configured sends users down a path that
+ * cannot succeed.
+ */
+export async function getSearchCapabilities(): Promise<CapabilitiesResponse> {
+  const res = await fetch(`${API_BASE_URL}/api/social/capabilities`);
+  if (!res.ok) throw new Error(`Capabilities unavailable (${res.status})`);
+  return await res.json();
+}

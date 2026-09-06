@@ -1,12 +1,41 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
-import { runSocialSearchPipeline, SocialSearchPipelineResponse } from '../services/api';
+import React, { useState, useRef, useEffect } from 'react';
+import {
+  runSocialSearchPipeline,
+  getSearchCapabilities,
+  SocialSearchPipelineResponse,
+  SearchCapabilities,
+} from '../services/api';
 
 export function SocialDiscoveryPipeline() {
   const [inputImage, setInputImage] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [threshold, setThreshold] = useState<number>(1.128);
+  // The no-match panel offers a one-click route to the hint field, which is
+  // collapsed by default and therefore easy to miss.
+  // What the backend can actually do. The panel below must describe this
+  // rather than promising face-only discovery that needs an API key.
+  const [caps, setCaps] = useState<SearchCapabilities | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getSearchCapabilities()
+      .then((c) => { if (!cancelled) setCaps(c.search); })
+      .catch(() => { if (!cancelled) setCaps(null); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const hintDetailsRef = useRef<HTMLDetailsElement>(null);
+  const hintInputRef = useRef<HTMLInputElement>(null);
+
+  const focusHint = () => {
+    // The field is either inside a <details> (reverse-image mode) or rendered
+    // inline (hint-required mode); handle both.
+    if (hintDetailsRef.current) hintDetailsRef.current.open = true;
+    const target = hintInputRef.current ?? hintDetailsRef.current;
+    target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    window.setTimeout(() => hintInputRef.current?.focus(), 350);
+  };
   const [loading, setLoading] = useState<boolean>(false);
   const [stepState, setStepState] = useState<number>(0);
   const [result, setResult] = useState<SocialSearchPipelineResponse | null>(null);
@@ -200,13 +229,46 @@ export function SocialDiscoveryPipeline() {
                 marginBottom: '1rem',
               }}
             >
+              {/* Describes the mechanism that is actually available. The old
+                  copy advertised "100% face-driven, no keyword needed", which
+                  only holds with a reverse-image API key configured - without
+                  one, leaving the hint blank can never return a result. */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.4rem' }}>
-                <span style={{ fontSize: '0.75rem', background: '#9fb886', color: '#ffffff', padding: '0.15rem 0.5rem', borderRadius: '4px', fontWeight: 400 }}> AUTO-DISCOVERY
+                <span style={{
+                  fontSize: '0.75rem',
+                  background: caps?.reverse_image_available ? '#9fb886' : '#cbbfa0',
+                  color: '#12140f',
+                  padding: '0.15rem 0.5rem',
+                  borderRadius: '4px',
+                  fontWeight: 500,
+                }}>
+                  {caps?.reverse_image_available ? 'FACE-DRIVEN' : 'FACE-GATED'}
                 </span>
-                <span style={{ fontSize: '0.85rem', color: '#f4f6f0', fontWeight: 400 }}> 100% Face-Driven Search
+                <span style={{ fontSize: '0.85rem', color: '#f4f6f0', fontWeight: 400 }}>
+                  {caps?.reverse_image_available
+                    ? `Reverse image search via ${caps.reverse_image_search}`
+                    : 'Live search, verified against your face'}
                 </span>
               </div>
-              <p style={{ margin: 0, fontSize: '0.8rem', color: 'rgba(255,255,255,0.62)', lineHeight: 1.5 }}> No name or keyword needed. The system analyzes the 128D biometric vector of the input face scan, autonomously queries live web & social indices, extracts public candidate post faces, and evaluates biometric distance.
+              <p style={{ margin: 0, fontSize: '0.8rem', color: 'rgba(255,255,255,0.62)', lineHeight: 1.5 }}>
+                {caps?.reverse_image_available ? (
+                  <>
+                    The face image itself is sent to the visual-search provider, so no
+                    name or keyword is needed. Every candidate returned is then
+                    re-detected, embedded and compared against your scan.
+                  </>
+                ) : caps?.live_search_available ? (
+                  <>
+                    <strong style={{ color: '#e8c46a' }}>A search hint is required.</strong>{' '}
+                    A 128D face vector cannot be sent to a text search engine, so discovery
+                    is seeded by a name or handle &mdash; then <strong>every</strong> candidate
+                    image is downloaded, every face in it embedded, and compared against your
+                    scan. Only a candidate under L&#8322; {caps ? 1.128 : ''} is returned.
+                    Face-only search needs a reverse-image API key.
+                  </>
+                ) : (
+                  <>Checking which discovery mechanism is available&hellip;</>
+                )}
               </p>
             </div>
 
@@ -242,20 +304,35 @@ export function SocialDiscoveryPipeline() {
               </div>
             </div>
 
-            {/* Optional Collapsible Filter for edge cases (hidden by default) */}
-            <details style={{ marginTop: '0.75rem' }}>
-              <summary style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.44)', cursor: 'pointer', outline: 'none' }}> Optional Search Hint (Leave blank for pure face-driven search)
-              </summary>
-              <div style={{ marginTop: '0.4rem' }}>
+            {/* The hint is only genuinely optional when a reverse-image
+                provider is configured. Without one it is required, so it is
+                shown expanded and labelled as such - collapsing it behind a
+                <details> summary made it easy to miss, and a blank hint then
+                produces a search that cannot possibly succeed. */}
+            {caps && !caps.reverse_image_available ? (
+              <div style={{ marginTop: '0.75rem' }}>
+                <label
+                  htmlFor="search-hint"
+                  style={{
+                    display: 'block',
+                    fontSize: '0.75rem',
+                    color: '#e8c46a',
+                    marginBottom: '0.35rem',
+                  }}
+                >
+                  Search hint &mdash; required
+                </label>
                 <input
+                  id="search-hint"
+                  ref={hintInputRef}
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Optional: specific handle or post URL"
+                  placeholder="Name, handle or post URL, e.g. Triggered Insaan"
                   style={{
                     width: '100%',
                     background: '#171a13',
-                    border: '1px solid #2c3125',
+                    border: `1px solid ${searchQuery.trim() ? '#2c3125' : 'rgba(232, 196, 106, 0.45)'}`,
                     color: '#f4f6f0',
                     padding: '0.5rem 0.75rem',
                     borderRadius: '6px',
@@ -264,8 +341,41 @@ export function SocialDiscoveryPipeline() {
                     outline: 'none',
                   }}
                 />
+                {!searchQuery.trim() && (
+                  <div style={{ marginTop: '0.35rem', fontSize: '0.72rem', color: 'rgba(255,255,255,0.44)', lineHeight: 1.5 }}>
+                    Leave this blank and the search has nothing to query &mdash; the run will
+                    return <strong>0 candidates</strong>. Enter a public name or handle; every
+                    result is still verified against your face.
+                  </div>
+                )}
               </div>
-            </details>
+            ) : (
+              <details ref={hintDetailsRef} style={{ marginTop: '0.75rem' }}>
+                <summary style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.44)', cursor: 'pointer', outline: 'none' }}>
+                  Optional search hint (leave blank for pure face-driven search)
+                </summary>
+                <div style={{ marginTop: '0.4rem' }}>
+                  <input
+                    ref={hintInputRef}
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Optional: specific handle or post URL"
+                    style={{
+                      width: '100%',
+                      background: '#171a13',
+                      border: '1px solid #2c3125',
+                      color: '#f4f6f0',
+                      padding: '0.5rem 0.75rem',
+                      borderRadius: '6px',
+                      fontSize: '0.8rem',
+                      boxSizing: 'border-box',
+                      outline: 'none',
+                    }}
+                  />
+                </div>
+              </details>
+            )}
           </div>
 
           <button
@@ -360,6 +470,70 @@ export function SocialDiscoveryPipeline() {
             {result.message}
           </p>
 
+          {/* What to do next. Branches on whether anything was actually
+              searched: zero candidates means there was no query to run, which
+              is a different situation from candidates checked and rejected. */}
+          {(() => {
+            const d = result.diagnostics?.search;
+            const nothingSearched = !d || d.candidates_considered === 0;
+            return (
+              <div
+                style={{
+                  background: 'rgba(32, 36, 26, 0.60)',
+                  border: '1px solid var(--rule-strong)',
+                  borderRadius: '10px',
+                  padding: '1rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.6rem',
+                }}
+              >
+                <div style={{ fontSize: '0.8rem', color: '#f4f6f0' }}>
+                  {nothingSearched
+                    ? 'Nothing was searched, so nothing was rejected.'
+                    : `${d!.candidates_verified} candidate image(s) were checked and none matched this face.`}
+                </div>
+
+                {nothingSearched ? (
+                  <p style={{ margin: 0, fontSize: '0.78rem', color: 'rgba(255,255,255,0.62)', lineHeight: 1.6 }}>
+                    A 128D face vector cannot be sent to a text search engine on its own.
+                    Give the search something to start from &mdash; either a name/handle hint,
+                    or a reverse-image API key for true face-only discovery.
+                  </p>
+                ) : (
+                  <p style={{ margin: 0, fontSize: '0.78rem', color: 'rgba(255,255,255,0.62)', lineHeight: 1.6 }}>
+                    The search ran and found real candidates, but none passed the biometric
+                    threshold. That is the correct result &mdash; a match is never invented.
+                    Try a different hint, or use tab <strong>02 1-to-1 verification</strong> to
+                    compare two images directly.
+                  </p>
+                )}
+
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.2rem' }}>
+                  <button
+                    onClick={focusHint}
+                    style={{
+                      background: 'linear-gradient(135deg, #8fa877 0%, #6f8a55 100%)',
+                      color: '#12140f',
+                      border: 'none',
+                      borderRadius: '8px',
+                      padding: '0.5rem 0.9rem',
+                      fontSize: '0.78rem',
+                      fontWeight: 500,
+                      cursor: 'pointer',
+                      fontFamily: 'inherit',
+                    }}
+                  >
+                    Add a search hint in Step 2
+                  </button>
+                  <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.44)', alignSelf: 'center' }}>
+                    e.g. a public name or handle, then re-run
+                  </span>
+                </div>
+              </div>
+            );
+          })()}
+
           {result.diagnostics?.search && (
             <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.44)' }}>
               <div style={{ marginBottom: '0.5rem' }}>
@@ -372,7 +546,10 @@ export function SocialDiscoveryPipeline() {
                   <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {c.image_url}
                   </span>
-                  <span className="mono" style={{ color: '#d3e3bb' }}>
+                  <span style={{ color: 'rgba(255,255,255,0.44)', whiteSpace: 'nowrap' }}>
+                    {c.faces_found} face{c.faces_found === 1 ? '' : 's'}
+                  </span>
+                  <span className="mono" style={{ color: c.euclidean_distance != null ? '#d3e3bb' : '#e8c46a', whiteSpace: 'nowrap' }}>
                     {c.euclidean_distance != null ? `L2 ${c.euclidean_distance.toFixed(4)}` : (c.error || '-')}
                   </span>
                 </div>

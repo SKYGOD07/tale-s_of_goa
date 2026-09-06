@@ -23,6 +23,7 @@ a terminal; the web UI is optional.
 5. [Blockchain by terminal](#5-blockchain-by-terminal)
 6. [Acceptance tests](#6-acceptance-tests)
 7. [Reading the numbers](#7-reading-the-numbers)
+7a. [`NO MATCH FOUND` — why, and how to get a match](#7a-no-match-found---why-and-how-to-get-a-match)
 8. [Optional: the web UI](#8-optional-the-web-ui)
 9. [Screen-recording script](#9-screen-recording-script)
 10. [Troubleshooting](#10-troubleshooting)
@@ -416,47 +417,276 @@ cd "C:\Tales of Goa\backend"
 
 ## 7. Reading the numbers
 
-### Thresholds
+### The only rule that decides anything
 
-| Metric | Match when | Source |
+```
+L2 <= 1.128   ->  MATCH
+L2 >  1.128   ->  NON-MATCH
+```
+
+Everything else on screen is presentation. Cosine and L2 are two views of one
+boundary — for unit vectors `L2 = sqrt(2 * (1 - cos))`, and
+`sqrt(2 * (1 - 0.363)) = 1.1287`. Both come from OpenCV Zoo's published SFace
+operating points (`sface.py`): **cosine >= 0.363**, **L2 <= 1.128**.
+
+### Conversion table
+
+Computed from the shipped `similarity_percentage()`, not estimated:
+
+| L2 | cosine | similarity | verdict |
+|---:|---:|---:|---|
+| 0.000 | +1.0000 | 100.00% | **MATCH** — identical file |
+| 0.300 | +0.9550 | 96.47% | **MATCH** |
+| 0.500 | +0.8750 | 90.19% | **MATCH** |
+| 0.650 | +0.7887 | 83.42% | **MATCH** |
+| 0.750 | +0.7188 | 77.92% | **MATCH** |
+| 0.786 | +0.6908 | 75.73% | **MATCH** |
+| 0.847 | +0.6415 | 71.86% | **MATCH** |
+| 0.950 | +0.5488 | 64.58% | **MATCH** |
+| 1.000 | +0.5000 | 60.75% | **MATCH** |
+| **1.128** | **+0.3638** | **50.06%** | **decision boundary** |
+| 1.200 | +0.2800 | 46.96% | non-match |
+| 1.280 | +0.1808 | 43.32% | non-match |
+| 1.319 | +0.1305 | 41.47% | non-match |
+| 1.410 | +0.0060 | 36.90% | non-match |
+| 1.500 | -0.1250 | 32.10% | non-match |
+
+### Realistic bands
+
+| Case | L2 | similarity |
 |---|---|---|
-| Cosine similarity | **≥ 0.363** | OpenCV Zoo `sface.py` |
-| Euclidean L2 | **≤ 1.128** | OpenCV Zoo `sface.py` |
+| Same file compared to itself | 0.00 | 100% |
+| Same person, good photos | 0.55 - 0.95 | 64% - 88% |
+| Same person, hard case (age gap, pose, lighting) | 0.95 - 1.10 | 55% - 65% |
+| **Decision boundary** | **1.128** | **50%** |
+| **Different people, in practice** | **1.20 - 1.45** | **35% - 47%** |
 
-One boundary, not two: `L2 = √(2(1 − cos))`, and `√(2(1 − 0.363)) = 1.1287`.
+> **Different people do NOT score 10%.** A widely repeated claim puts the
+> rejection band at "10-40%". It is wrong for this system. Reaching 10% would
+> require cosine ~= **-0.73**, meaning two faces pointing in near-opposite
+> directions in embedding space — which two real human faces essentially never
+> produce. The practical floor is around **35%**.
+>
+> This matters when reading a result: **41.47% is not borderline.** It sits well
+> below the 50% boundary (L2 1.319 vs 1.128) and is a clean rejection. Judge by
+> L2 against 1.128, never by how large the percentage "feels".
 
-### Typical ranges
+### Why the percentage is not raw cosine x 100
 
-| Case | cosine | L2 |
-|---|---|---|
-| Same person, good photos | +0.55 … +0.85 | 0.55 … 0.95 |
-| Same person, hard case (age gap, pose) | +0.40 … +0.55 | 0.95 … 1.10 |
-| **Decision boundary** | **+0.363** | **1.128** |
-| Different people | −0.10 … +0.25 | 1.22 … 1.48 |
+Raw `cosine * 100` made a genuine match at the boundary read as **36%**, which
+looks like failure. `similarity_percentage()` maps cosine onto 0-100 with the
+threshold pinned at exactly **50%**, so anything at or above 50% is a match.
 
-### Similarity percentage
+**The 50% figure is this project's display convention, not part of the OpenCV
+specification.** OpenCV publishes only `cosine >= 0.363` / `L2 <= 1.128`.
 
-Not raw `cosine × 100`. The threshold is pinned at exactly **50%**, so anything
-≥ 50% is a match:
+### Worked example — 75.73%, L2 0.7864
 
-| cosine | shown | verdict |
-|---|---|---|
-| +1.000 | 100.00% | match |
-| +0.800 | 84.30% | match |
-| +0.6415 | 71.86% | match ← *your same-person pair* |
-| **+0.363** | **50.00%** | **boundary** |
-| +0.1305 | 41.47% | non-match ← *your different-person pair* |
-| 0.000 | 36.68% | non-match |
+A real result from tab `02`:
 
-Raw cosine ×100 made a genuine boundary match read as "36%", which looks like
-failure. The verdict is always driven by the **L2 threshold**, never by this
-display number.
+```
+L2 0.7864  ->  cosine = 1 - (0.7864^2 / 2) = 0.6908
+           ->  50 + 50 * ((0.6908 - 0.363) / (1 - 0.363)) = 75.73%
+           ->  0.7864 <= 1.128  ->  IDENTITY MATCH VERIFIED
+```
+
+That is a **strong** match. Two different photographs of one person are never
+100% — lighting, camera distance, crop, head tilt and expression all move the
+vector. 100% happens only when an image is compared with the byte-identical
+file. A same-person score in the 70-85% band is exactly what correct behaviour
+looks like.
 
 ### Do not tune the threshold
 
-If a genuine pair fails, the fix is upstream — better lighting, a more frontal
-photo, a clearer face. Widening the threshold buys false accepts, and the
-negative test will start failing.
+If a genuine pair fails, fix it upstream: better lighting, a more frontal photo,
+a larger face in frame. Widening the threshold buys false accepts, and
+`tests.test_recognition` TEST 2 will start failing — which is precisely what
+that test is for.
+
+---
+
+## 7a. `NO MATCH FOUND` - why, and how to get a match
+
+The most common confusion. It is **not** a bug, and not a failure of the face
+recognition.
+
+### Why it happened
+
+A 128-dimensional vector cannot be handed to a text search engine. Something has
+to produce candidate pages before any face can be compared. There are exactly
+two ways to do that:
+
+| Route | Needs | Configured now |
+|---|---|---|
+| Reverse image search — send the **image** itself | `REVERSE_IMAGE_PROVIDER` + Bing key | no |
+| Live text-seeded search — send a **hint**, gate on the face | nothing | yes |
+
+With the hint box empty **and** no reverse-image key, there is no query to run.
+Zero candidates are gathered, zero faces are compared, and the honest answer is:
+
+```
+NO MATCH FOUND
+  No matching public social media post found. No reverse-image provider is
+  configured, so a face alone cannot be searched against the web.
+
+  Mechanisms      : ['none']
+  Candidates      : 0 considered, 0 face-verified
+
+  This is a correct result. No identity was invented.
+```
+
+Note `Candidates: 0 considered`. Nothing was searched, so nothing was rejected.
+This is different from *"12 candidates were checked and none matched"*, which
+means the search ran and your face genuinely was not among them.
+
+The system returns nothing rather than substituting a stand-in identity. The
+earlier build did the opposite — it returned the nearest of five hardcoded
+people, which is how an unrelated face "discovered" Guido van Rossum.
+
+### How to get a confirmed match
+
+#### Option A - supply a search hint (works today, no key)
+
+1. Open **`> Optional Search Hint`** in Step 2 of tab `01`.
+2. Type a name that is publicly indexed - for example `Linus Torvalds`,
+   `Serena Williams`, or your own public handle.
+3. Upload a photo **of that person**.
+4. Run the pipeline.
+
+The live search gathers ~12 real candidates, downloads every image, embeds every
+face in each, and returns a result only if one passes `L2 <= 1.128`.
+
+Terminal equivalent:
+
+```powershell
+cd "C:\Tales of Goa\backend"
+.\.venv\Scripts\python.exe run_pipeline.py --image "tests\fixtures\different_person\02_other_person.jpg" --query "Serena Williams"
+```
+
+> The hint seeds *discovery only*. It never decides the outcome - supply your own
+> face with someone else's name and every candidate is rejected. That is the
+> demonstration that results are not pre-picked; see
+> [Section 9 step 4](#9-screen-recording-script).
+
+#### Option B - 1-to-1 verification (no search at all)
+
+Tab **`02 1-to-1 verification`**. Upload two images, or use the webcam on the
+left and a photo on the right. This skips discovery entirely and exercises
+detection, alignment, embedding, matching and the blockchain commit.
+
+Best route when the subject is a **private individual** who is not in any public
+index - the search stage cannot find such a person, and correctly says so.
+
+#### Option C - true face-only discovery (needs a key)
+
+Set `REVERSE_IMAGE_PROVIDER=bing` and `BING_VISUAL_SEARCH_KEY` in
+`backend/.env`. The face image itself is then sent to a visual-search service and
+no hint is required. See [Section 3](#3-api-keys--what-exists-what-is-required).
+
+### Which "no match" did I get?
+
+| Output | Meaning | Do |
+|---|---|---|
+| `Candidates: 0 considered` | Nothing was searched | Add a hint, or configure Bing |
+| `Candidates: 12 considered / 12 verified`, none passed | The search ran; your face is not in those results | Correct behaviour. Try a different hint, or use tab `02` |
+| `no face in candidate image` on every row | Candidates had no detectable faces | Try a hint that returns portrait photos |
+| `No face detected in the supplied image` | The **input** failed detection | Use a clearer, more frontal photo |
+### Searching for your own handle or social profile
+
+Entering your own name or handle (`adityatomar4877-rgb`, `Aditya Tomar`) is a
+legitimate test, but it helps to know what the search can and cannot reach.
+
+#### What the live search actually queries
+
+Two live calls per run:
+
+```python
+DDGS().images(query, max_results=12)
+DDGS().text(f"{query} (site:github.com OR site:x.com OR site:reddit.com OR site:wikipedia.org)")
+```
+
+The site filter is **GitHub, X/Twitter, Reddit and Wikipedia**. Instagram and
+Facebook are **not** in it — their public indexes are thin and largely behind
+login walls, so including them mostly returns pages with no usable image. The
+image search itself is unfiltered and may still surface other platforms.
+
+#### Why your own handle usually returns no match
+
+| Reason | What appears in the audit | Is it a bug? |
+|---|---|---|
+| Profile picture is an illustration, logo, initials or anime avatar | `no face in candidate image` | No |
+| Account is private or behind a login wall (Instagram, Facebook) | `image could not be downloaded or decoded`, or no candidates | No |
+| You are simply not in a public web image index | `Candidates: 0 considered`, or all rows rejected | No |
+| Search found real photos of a **different** person with a similar name | rows with `L2 > 1.128`, rejected | No — working correctly |
+
+> **A correction worth knowing.** A profile picture that is *not a face* is
+> rejected at the **detection** stage with `no face in candidate image` — YuNet
+> finds nothing to embed. It is **not** rejected by an `L2 > 1.128` comparison,
+> because no embedding is ever produced for it.
+>
+> The distinction is visible in `candidate_report`: a detection rejection has
+> `faces_found: 0` and no scores, while a biometric rejection has
+> `faces_found: 1` and a real L2 value.
+
+#### A note specific to this repository
+
+`adityatomar4877-rgb` was one of the **five hardcoded entries** in the deleted
+`AUTONOMOUS_CANDIDATE_POOL`. In the earlier build that handle appeared to
+"match" because its avatar was downloaded and compared on every single run,
+whatever face was supplied.
+
+That pool is gone. Searching that handle now goes through the same live query and
+the same mandatory face gate as any other input — so a match today means the face
+genuinely matched, and no match means it genuinely did not. See
+[ARCHITECTURE.md §12](ARCHITECTURE.md#12-audit-history--what-was-wrong-before).
+
+### Demonstrating both outcomes
+
+For the recording, show the negative **and** the positive. The negative is the
+stronger evidence.
+
+| Order | Run | Shows |
+|---|---|---|
+| 1 | Your face, **no hint** | `NO MATCH FOUND`, `Candidates: 0 considered` — nothing invented |
+| 2 | Your face, hint = **someone else's name** | 12 real candidates found, **all rejected** on L2 — the search is genuinely face-gated |
+| 3 | That person's photo, **same hint** | Candidates checked → `MATCH CONFIRMED` → `CONFIRMED ON-CHAIN` |
+
+Run 2 is what proves compliance with requirement 2. A hardcoded system would have
+returned a match there.
+
+```powershell
+cd "C:\Tales of Goa\backend"
+
+# 1 - honest empty result
+.\.venv\Scripts\python.exe run_pipeline.py --image "tests\fixtures\same_person\02_you_2026-09-05.jpg"
+
+# 2 - real candidates, all rejected  (wait ~20s between search runs)
+.\.venv\Scripts\python.exe run_pipeline.py --image "tests\fixtures\same_person\02_you_2026-09-05.jpg" --query "Bill Gates"
+
+# 3 - genuine match, committed on-chain
+.\.venv\Scripts\python.exe run_pipeline.py --image "tests\fixtures\different_person\02_other_person.jpg" --query "Serena Williams"
+```
+
+#### Describing it accurately
+
+If you narrate the recording, this wording is defensible:
+
+> "With no hint and no reverse-image key there is nothing to query — a
+> 128-dimensional vector cannot be sent to a text search engine. The pipeline
+> reports no match and zero candidates rather than inventing one.
+>
+> With a hint, the live search returns real candidate pages. Every candidate
+> image is downloaded, every face in it is detected and embedded, and each is
+> compared against the input face. Only a candidate below the published SFace
+> threshold of L2 1.128 is returned. Supplying my own face with someone else's
+> name finds that person's real photos and rejects all of them — which is what
+> shows the result is not pre-picked."
+
+Two claims to avoid, because they are not true of this build:
+
+- that the system "searches Instagram and Facebook" — it does not target them
+- that a non-face avatar is "rejected by L2" — it is rejected before any
+  comparison happens
 
 ---
 
