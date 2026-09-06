@@ -42,7 +42,8 @@ from app.services.face_processor import (
     crop_face_region,
     SFACE_L2_THRESHOLD,
 )
-from app.services.gallery import enroll
+from app.services.gallery import enroll, match_gallery
+from app.services.naming import resolve_identity_name
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -113,6 +114,23 @@ def _decode(raw: bytes) -> np.ndarray:
     return cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
 
 
+def _unique_placeholder() -> str:
+    """
+    A label for a subject the operator did not name.
+
+    Distinct per subject on purpose. A shared placeholder is what let unrelated
+    faces accumulate in one record; a numbered one keeps them apart until the
+    operator supplies a real name.
+    """
+    from app.services.gallery import load_gallery
+
+    used = {i["name"] for i in load_gallery()["identities"]}
+    n = 1
+    while f"Unidentified subject {n}" in used:
+        n += 1
+    return f"Unidentified subject {n}"
+
+
 async def teach_identity(
     probe_bgr: np.ndarray,
     review: str,
@@ -131,7 +149,7 @@ async def teach_identity(
     urls = extract_urls(review)
     references: List[Dict[str, Any]] = []
     verified: List[Dict[str, Any]] = []
-    resolved_name = name.strip()
+    verified_names: List[str] = []
 
     for url in urls:
         platform = _platform_of(url)
@@ -162,8 +180,7 @@ async def teach_identity(
                                    "status": "error", "reason": "account or avatar not reachable"})
                 continue
 
-            if not resolved_name:
-                resolved_name = got["display_name"]
+            verified_names.append(got["display_name"])
 
             try:
                 img = _decode(got["bytes"])
@@ -225,20 +242,56 @@ async def teach_identity(
         ),
     })
 
+    cited = [r["url"] for r in references
+             if r["status"] in ("verified", "unverified")]
+
+    resolved_name = resolve_identity_name(
+        explicit=name,
+        review=review,
+        verified_display_names=verified_names,
+        cited_urls=cited,
+    )
+
+    # No name anywhere in the review. The old behaviour - filing the subject
+    # under the literal string "Unnamed identity" - merged every such person
+    # into ONE gallery record, and because an identity scores on its closest
+    # stored face, that record went on to match almost anybody.
+    #
+    # So fall back to biometric evidence instead of a shared label: if this
+    # face already matches an enrolled identity, extend that one; otherwise
+    # give it a record of its own.
+    name_source = "operator" if resolved_name else ""
     if not resolved_name:
-        resolved_name = "Unnamed identity"
+        existing = match_gallery(probe_emb, threshold=threshold)["match"]
+        if existing:
+            resolved_name = existing["name"]
+            name_source = "matched an enrolled identity"
+        else:
+            resolved_name = _unique_placeholder()
+            name_source = "no name given - filed separately"
 
     identity = enroll(
         name=resolved_name,
         embeddings=verified,
-        source_urls=[r["url"] for r in references
-                     if r["status"] in ("verified", "unverified")],
+        source_urls=cited,
         review=review,
     )
+
+    # The operator's name is taken at face value, but if this face ALSO matches
+    # a different enrolled person, one of the two labels is wrong and the
+    # gallery now holds the same face under two names. Say so rather than
+    # letting a silent duplicate accumulate.
+    also_matches = [
+        r["name"]
+        for r in match_gallery(probe_emb, threshold=threshold)["all_scored"]
+        if r["is_match"] and r["name"] != resolved_name
+    ]
 
     return {
         "success": True,
         "identity": resolved_name,
+        "name_source": name_source,
+        "also_matches": also_matches,
         "enrolled_faces": len(identity["faces"]),
         "added_now": len(verified),
         "references": references,

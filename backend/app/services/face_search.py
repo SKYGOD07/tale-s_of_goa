@@ -29,7 +29,7 @@ import re
 import hashlib
 import urllib.parse
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
 import httpx
@@ -533,6 +533,97 @@ async def verify_candidate(candidate: Candidate, scan_embedding: List[float],
     return candidate
 
 
+# Hosts that refuse anonymous retrieval. Naming them means the operator is told
+# WHY a URL they pasted contributed nothing, instead of it being quietly turned
+# into a text query. Verified against the live sites:
+#   linkedin.com/in/...    -> HTTP 999 authwall, no og:image at all
+#   media.licdn.com/...    -> HTTP 403 on the image itself, with any headers
+# A LinkedIn *post* page does serve og:image metadata, but the image it points
+# at is on media.licdn.com and is blocked, so nothing usable comes back either.
+_BLOCKED_HINT_HOSTS = {
+    "linkedin.com": "LinkedIn blocks anonymous requests (HTTP 999 on profiles, "
+                    "HTTP 403 on media.licdn.com images)",
+    "instagram.com": "Instagram requires authentication for profile media",
+    "facebook.com": "Facebook requires authentication for profile media",
+}
+
+
+def _classify_hint_url(url: str) -> Optional[str]:
+    """The reason this URL cannot be fetched, or None if it can be tried."""
+    low = url.lower()
+    for host, reason in _BLOCKED_HINT_HOSTS.items():
+        if host in low:
+            return reason
+    return None
+
+
+async def _cited_url_candidates(query: str) -> Tuple[List[Candidate], List[Dict[str, str]]]:
+    """
+    Fetch any URL the operator pasted into the hint.
+
+    A pasted URL is a direct instruction - "look at this page" - and treating it
+    as a bag of search words instead is how a hint citing a LinkedIn profile
+    ended up searching for a famous rapper who shares part of the slug. Fetch
+    what can be fetched; report the rest rather than silently degrading it.
+    """
+    urls = re.findall(r"https?://[^\s,)<>\"']+", query or "")
+    out: List[Candidate] = []
+    report: List[Dict[str, str]] = []
+
+    for raw in urls:
+        url = raw.rstrip(".,;)")
+
+        blocked = _classify_hint_url(url)
+        if blocked:
+            report.append({"url": url, "status": "blocked", "detail": blocked})
+            continue
+
+        try:
+            og = await _opengraph_image(url)
+        except Exception as e:
+            report.append({"url": url, "status": "error", "detail": str(e)})
+            continue
+
+        if not og:
+            report.append({"url": url, "status": "no_image",
+                           "detail": "page fetched, but it exposes no og:image or twitter:image"})
+            continue
+
+        report.append({"url": url, "status": "fetched", "detail": og})
+        out.append(Candidate(
+            page_url=url, image_url=og,
+            title="Page cited in the search hint",
+            platform=detect_platform(url),
+            source="direct:hint_url",
+        ))
+
+    return out, report
+
+
+def _text_from_hint(query: str) -> str:
+    """
+    The part of a hint worth sending to a text search engine.
+
+    URLs are stripped: a search engine matches on the readable fragments of a
+    slug, which is how "linkedin.com/in/rza-mohammed-072859332" retrieved the
+    Wu-Tang rapper. When a profile URL yields a name, that name is searched
+    instead, which is what the operator meant.
+    """
+    from app.services.naming import name_from_profile_url
+
+    urls = re.findall(r"https?://[^\s,)<>\"']+", query or "")
+    text = re.sub(r"https?://\S+", " ", query or "")
+    text = re.sub(r"[()\[\]]", " ", text)
+    text = " ".join(text.split()).strip(" .,:;-")
+
+    for u in urls:
+        name = name_from_profile_url(u)
+        if name and name.lower() not in text.lower():
+            text = f"{text} {name}".strip()
+
+    return text
+
+
 async def discover_matching_post(
     scan_embedding: List[float],
     scan_image_bytes: Optional[bytes] = None,
@@ -558,6 +649,7 @@ async def discover_matching_post(
         mechanisms.append(caps["reverse_image_search"])
         candidates.extend(await _reverse_image_candidates(scan_image_bytes))
 
+    hint_report: List[Dict[str, str]] = []
     if query:
         # A handle or profile URL resolves to that platform's avatar directly.
         direct = await _profile_avatar_candidates(query)
@@ -565,9 +657,16 @@ async def discover_matching_post(
             mechanisms.append("Direct profile avatar")
             candidates.extend(direct)
 
-        if caps["live_search_available"]:
+        # Any other URL in the hint is fetched on its own merits.
+        cited, hint_report = await _cited_url_candidates(query)
+        if cited:
+            mechanisms.append("Page cited in the hint")
+            candidates.extend(cited)
+
+        text_query = _text_from_hint(query)
+        if caps["live_search_available"] and text_query:
             mechanisms.append(f"{caps['live_search_engine']} (text-seeded, face-gated)")
-            candidates.extend(await _live_search_candidates(query))
+            candidates.extend(await _live_search_candidates(text_query))
 
     # De-duplicate on image URL, keeping first-seen order.
     seen_urls, merged = set(), []
@@ -654,5 +753,6 @@ async def discover_matching_post(
         "capabilities": caps,
         "threshold_l2": l2_threshold,
         "note": note,
+        "hint_report": hint_report,
         "candidate_report": [c.to_report() for c in scored[:MAX_CANDIDATES]],
     }

@@ -712,6 +712,30 @@ export function SocialDiscoveryPipeline() {
                     : `${d!.candidates_verified} candidate image(s) were checked and none matched this face.`}
                 </div>
 
+                {/* A pasted URL that could not be fetched used to vanish
+                    silently, leaving the operator to conclude the face search
+                    had failed. Say what happened to each one. */}
+                {d?.hint_report && d.hint_report.length > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+                    {d.hint_report.map((h, i) => (
+                      <div key={i} style={{ fontSize: '0.73rem', lineHeight: 1.5 }}>
+                        <span style={{
+                          color: h.status === 'fetched' ? '#a9e3b4' : '#e8c46a',
+                          textTransform: 'uppercase',
+                          fontSize: '0.65rem',
+                          letterSpacing: '0.06em',
+                        }}>
+                          {h.status === 'fetched' ? 'fetched' : h.status.replace('_', ' ')}
+                        </span>{' '}
+                        <span style={{ color: 'rgba(255,255,255,0.62)', wordBreak: 'break-all' }}>
+                          {h.url}
+                        </span>
+                        <div style={{ color: 'rgba(255,255,255,0.44)' }}>{h.detail}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
                 {nothingSearched ? (
                   <p style={{ margin: 0, fontSize: '0.78rem', color: 'rgba(255,255,255,0.62)', lineHeight: 1.6 }}>
                     A 128D face vector cannot be sent to a text search engine on its own.
@@ -785,67 +809,13 @@ export function SocialDiscoveryPipeline() {
 
       {result && result.match_found !== false && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          {/* RECOGNISED FROM MEMORY. This is checked before any web lookup and
-              is the only mechanism that reliably re-identifies a specific
-              person: reverse image search retrieves on overall visual
-              similarity, so it returns look-alikes and matching accessories,
-              not necessarily the same face. */}
-          {result.known_identity && (
-            <div style={{
-              background: 'rgba(20, 23, 16, 0.85)',
-              border: '1px solid rgba(127,214,162,0.45)',
-              borderRadius: '16px', padding: '1.5rem',
-              display: 'flex', gap: '1rem', alignItems: 'flex-start', flexWrap: 'wrap',
-            }}>
-              {result.known_identity.thumbnail && (
-                <img src={result.known_identity.thumbnail} alt=""
-                     style={{ width: 72, height: 72, borderRadius: '10px', objectFit: 'cover',
-                              border: '1px solid rgba(127,214,162,0.4)' }} />
-              )}
-              <div style={{ flex: 1, minWidth: 240 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
-                  <span className="tag tag--live">Known identity</span>
-                  <h3 style={{ margin: 0, fontSize: '1.15rem', color: '#f4f6f0' }}>
-                    {result.known_identity.name}
-                  </h3>
-                  <span className="mono" style={{ fontSize: '0.78rem', color: '#a9e3b4' }}>
-                    {result.known_identity.similarity_percentage?.toFixed(1)}% &middot;
-                    L2 {result.known_identity.euclidean_distance?.toFixed(4)}
-                  </span>
-                </div>
-                <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.62)', marginTop: '0.35rem', lineHeight: 1.6 }}>
-                  Recognised from {result.known_identity.reference_count} enrolled reference
-                  photo{result.known_identity.reference_count === 1 ? '' : 's'} &mdash; matched via{' '}
-                  <span style={{ color: '#d3e3bb' }}>{result.known_identity.matched_origin}</span>.
-                  This came from memory, not from the web search below.
-                </div>
-                {result.known_identity.source_urls?.length > 0 && (
-                  <div style={{ marginTop: '0.4rem', display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
-                    {result.known_identity.source_urls.map((u, i) => (
-                      <a key={i} href={u} target="_blank" rel="noreferrer"
-                         style={{ fontSize: '0.73rem', color: 'rgba(255,255,255,0.62)',
-                                  borderBottom: '1px solid var(--rule-strong)',
-                                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {u}
-                      </a>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {result.gallery && !result.known_identity && result.gallery.enrolled_identities > 0 && (
-            <div style={{
-              background: 'var(--surface-sunken)', border: '1px solid var(--rule)',
-              borderRadius: '10px', padding: '0.75rem 1rem',
-              fontSize: '0.75rem', color: 'rgba(255,255,255,0.44)',
-            }}>
-              Checked against {result.gallery.enrolled_identities} enrolled
-              identit{result.gallery.enrolled_identities === 1 ? 'y' : 'ies'}
-              {' '}({result.gallery.enrolled_faces} reference faces) &mdash; no match from memory.
-            </div>
-          )}
+          {/* The enrolled gallery is deliberately NOT surfaced as its own
+              panel. What memory is for is producing a correct, web-reachable
+              profile in the results below - naming the internal reference it
+              matched on tells the operator nothing verifiable, and a
+              self-match against the operator's own copy of the photo would
+              read as a 100% result while proving nothing. Recognition still
+              runs first, server-side; it just speaks through the results. */}
 
           <LearningPanel
             refreshKey={feedbackTick}
@@ -1146,6 +1116,13 @@ export function SocialDiscoveryPipeline() {
                         )}
                       </div>
                     ))}
+                    {taught.also_matches && taught.also_matches.length > 0 && (
+                      <div style={{ color: '#e8c46a', marginTop: '0.4rem', lineHeight: 1.5 }}>
+                        This face also matches {taught.also_matches.join(', ')}. One of those
+                        names is wrong &mdash; the same person is now stored under two
+                        identities. Delete whichever is incorrect before searching again.
+                      </div>
+                    )}
                     <div style={{ marginTop: '0.4rem', color: 'rgba(255,255,255,0.44)' }}>
                       Next time this face is searched it is recognised from memory first,
                       before any web lookup. Teach it again with other photos of the same

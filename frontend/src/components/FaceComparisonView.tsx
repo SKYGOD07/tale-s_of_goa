@@ -1,7 +1,10 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { FaceBox, CompareResponse, PixelStats, compareFaces, detectFace } from '../services/api';
+import {
+  FaceBox, CompareResponse, PixelStats, compareFaces, detectFace,
+  enrollIdentity, EnrollResult,
+} from '../services/api';
 import { FaceOverlay } from './FaceOverlay';
 import { PixelInspectionPanel } from './PixelInspectionPanel';
 
@@ -39,6 +42,17 @@ export function FaceComparisonView({ onNotify }: Props) {
   const [autoRecord, setAutoRecord] = useState<boolean>(true);
   const [isComparing, setIsComparing] = useState<boolean>(false);
   const [result, setResult] = useState<CompareResponse | null>(null);
+
+  /* Enrolment. A confirmed 1-to-1 result is the cleanest evidence the
+     system ever gets that two photos are the same person - both images are
+     in hand and a human has just judged the verdict. Storing that pair is
+     what lets a later, different photo of them be recognised. */
+  const [comparedA, setComparedA] = useState<string | null>(null);
+  const [enrollName, setEnrollName] = useState<string>('');
+  const [enrollAuthorized, setEnrollAuthorized] = useState<boolean>(false);
+  const [enrollBusy, setEnrollBusy] = useState<boolean>(false);
+  const [enrollResult, setEnrollResult] = useState<EnrollResult | null>(null);
+  const [enrollError, setEnrollError] = useState<string>('');
   const [copiedHash, setCopiedHash] = useState<string | null>(null);
 
   // Video refs for Image A
@@ -237,6 +251,12 @@ export function FaceComparisonView({ onNotify }: Props) {
     try {
       setIsComparing(true);
       setResult(null);
+      // A fresh comparison invalidates the previous enrolment panel, the
+      // same way the discovery tab clears its review box on every run.
+      setEnrollResult(null);
+      setEnrollError('');
+      setEnrollName('');
+      setComparedA(sourceA);
       const res = await compareFaces(sourceA, imageB, threshold, autoRecord);
       setResult(res);
       if (res.face_a_box) setFaceABoxes([res.face_a_box]);
@@ -253,6 +273,26 @@ export function FaceComparisonView({ onNotify }: Props) {
       alert(`Comparison failed: ${err.message || 'Unknown error'}`);
     } finally {
       setIsComparing(false);
+    }
+  };
+
+  const handleEnroll = async () => {
+    if (!comparedA || !imageB || !enrollName.trim()) return;
+    setEnrollBusy(true);
+    setEnrollError('');
+    try {
+      const res = await enrollIdentity(
+        [comparedA, imageB],
+        enrollName.trim(),
+        `Enrolled from a confirmed 1-to-1 verification at L2 ${result?.euclidean_distance?.toFixed(4)}.`,
+        enrollAuthorized,
+        threshold,
+      );
+      setEnrollResult(res);
+    } catch (e: any) {
+      setEnrollError(e?.message || 'Enrolment failed');
+    } finally {
+      setEnrollBusy(false);
     }
   };
 
@@ -931,15 +971,19 @@ export function FaceComparisonView({ onNotify }: Props) {
                 <span style={{ fontSize: '0.875rem', fontWeight: 500, color: '#9ce0b8', display: 'flex', alignItems: 'center', gap: '6px' }}> EVM Smart Contract Confirmation
                 </span>
                 <span style={{
-                  background: '#7fd6a2',
-                  color: '#000000',
+                  background: result.blockchain_result.simulated ? 'transparent' : '#7fd6a2',
+                  color: result.blockchain_result.simulated ? '#e8c46a' : '#000000',
+                  border: result.blockchain_result.simulated
+                    ? '1px solid rgba(232,196,106,0.5)' : 'none',
                   padding: '2px 8px',
                   borderRadius: '4px',
                   fontSize: '0.75rem',
                   fontWeight: 500,
                   textTransform: 'uppercase',
                 }}>
-                  {result.blockchain_result.status}
+                  {result.blockchain_result.simulated
+                    ? 'simulated - not broadcast'
+                    : result.blockchain_result.status}
                 </span>
               </div>
 
@@ -954,13 +998,122 @@ export function FaceComparisonView({ onNotify }: Props) {
                 </div>
                 <div>
                   <span style={{ color: 'rgba(255,255,255,0.44)' }}>Block Number: </span>
-                  <span style={{ color: '#ffffff' }}>#{result.blockchain_result.block_number || '1048291'}</span>
+                  <span style={{ color: '#ffffff' }}>
+                    {result.blockchain_result.block_number
+                      ? '#' + result.blockchain_result.block_number
+                      : 'not mined'}
+                  </span>
                 </div>
                 <div>
                   <span style={{ color: 'rgba(255,255,255,0.44)' }}>Timestamp: </span>
                   <span style={{ color: 'rgba(255,255,255,0.62)' }}>{result.blockchain_result.timestamp}</span>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* REMEMBER THIS PERSON.
+              A verified pair is the strongest evidence the system gets that
+              two photos show the same face, so it is the right moment to store
+              them. Both images go in, and the backend re-checks the second
+              against the first before storing - the operator's word alone is
+              not enough, because one mislabelled reference would make this
+              identity wrong for good.
+
+              Enrolled photos improve recognition only. They are marked
+              not-web-reachable, so they can never be served back as a
+              "discovered post". */}
+          {result.is_match && comparedA && imageB && (
+            <div style={{
+              background: 'rgba(20, 23, 16, 0.85)',
+              border: '1px solid var(--rule-strong)',
+              borderRadius: '16px',
+              padding: '20px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px',
+            }}>
+              <div>
+                <div style={{ fontSize: '0.95rem', color: '#f4f6f0' }}>Remember this person</div>
+                <p style={{ margin: '4px 0 0', fontSize: '0.75rem', color: 'rgba(255,255,255,0.62)', lineHeight: 1.6 }}>
+                  Stores both photos under one name. A later photo of them is then
+                  scored against whichever of these references is closest, which is
+                  what lets an older or differently-lit picture still match.
+                </p>
+              </div>
+
+              {!enrollResult && (
+                <>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    <input
+                      value={enrollName}
+                      onChange={(e) => setEnrollName(e.target.value)}
+                      placeholder="Name for this identity"
+                      style={{
+                        flex: 1, minWidth: 200,
+                        background: 'var(--surface-sunken)',
+                        border: '1px solid var(--rule)',
+                        borderRadius: '8px',
+                        padding: '0.5rem 0.7rem',
+                        color: '#f4f6f0',
+                        fontSize: '0.82rem',
+                        fontFamily: 'inherit',
+                      }}
+                    />
+                    <button
+                      onClick={handleEnroll}
+                      disabled={enrollBusy || !enrollName.trim() || !enrollAuthorized}
+                      style={{
+                        background: (!enrollName.trim() || !enrollAuthorized)
+                          ? 'rgba(255,255,255,0.06)'
+                          : 'linear-gradient(135deg, #8fa877 0%, #6f8a55 100%)',
+                        color: (!enrollName.trim() || !enrollAuthorized) ? 'rgba(255,255,255,0.35)' : '#12140f',
+                        border: 'none', borderRadius: '8px',
+                        padding: '0.5rem 1rem', fontSize: '0.8rem', fontWeight: 500,
+                        cursor: (enrollBusy || !enrollName.trim() || !enrollAuthorized) ? 'not-allowed' : 'pointer',
+                        fontFamily: 'inherit',
+                      }}
+                    >
+                      {enrollBusy ? 'Enrolling...' : 'Enrol both photos'}
+                    </button>
+                  </div>
+
+                  <label style={{
+                    display: 'flex', alignItems: 'flex-start', gap: '8px',
+                    fontSize: '0.72rem', color: 'rgba(255,255,255,0.62)', lineHeight: 1.5,
+                  }}>
+                    <input
+                      type="checkbox"
+                      checked={enrollAuthorized}
+                      onChange={(e) => setEnrollAuthorized(e.target.checked)}
+                      style={{ marginTop: 2 }}
+                    />
+                    <span>
+                      I am authorised to store these images as biometric reference data.
+                      An enrolled identity can be deleted at any time via{' '}
+                      <code>DELETE /api/social/gallery/&lt;name&gt;</code>.
+                    </span>
+                  </label>
+                </>
+              )}
+
+              {enrollError && (
+                <div style={{ fontSize: '0.75rem', color: '#e89a9a' }}>{enrollError}</div>
+              )}
+
+              {enrollResult && (
+                <div style={{ fontSize: '0.78rem', color: '#a9e3b4', lineHeight: 1.6 }}>
+                  Stored &ldquo;{enrollResult.identity}&rdquo; &mdash; {enrollResult.added_now} photo
+                  {enrollResult.added_now === 1 ? '' : 's'} added, {enrollResult.total_references} reference
+                  {enrollResult.total_references === 1 ? '' : 's'} on file.
+                  {enrollResult.rejected.length > 0 && (
+                    <div style={{ color: '#e8c46a', marginTop: 4 }}>
+                      {enrollResult.rejected.length} image rejected:{' '}
+                      {enrollResult.rejected.map((r) => r.reason).join('; ')}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 

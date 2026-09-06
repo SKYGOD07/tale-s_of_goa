@@ -37,6 +37,16 @@ from app.services.face_processor import (
     SFACE_L2_THRESHOLD,
 )
 
+
+class DivergentFace(Exception):
+    """Raised when every offered face contradicts the identity it would join."""
+
+    def __init__(self, rejected):
+        self.rejected = rejected
+        super().__init__(
+            "; ".join(r["reason"] for r in rejected) or "face does not match this identity"
+        )
+
 _DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "..", "data")
 GALLERY_PATH = os.path.abspath(os.path.join(_DIR, "gallery.json"))
 
@@ -80,6 +90,7 @@ def enroll(
     source_urls: Optional[List[str]] = None,
     review: str = "",
     notes: str = "",
+    allow_divergent: bool = False,
 ) -> Dict[str, Any]:
     """
     Add or extend an identity.
@@ -117,6 +128,41 @@ def enroll(
     if notes:
         ident.setdefault("notes", []).append(notes[:500])
 
+    # An identity may only hold ONE person. Appending a face that matches none
+    # of the stored references is how a record turns into a mixed bucket, and a
+    # mixed record is worse than no record: scoring is nearest-reference, so it
+    # goes on to match almost anybody with confidence.
+    #
+    # Divergence is not automatically an error - the same person ages, grows a
+    # beard, changes cameras - so the rejection carries the distance, and the
+    # operator can confirm the pair on the 1-to-1 page and enrol it there.
+    rejected: List[Dict[str, Any]] = []
+    if ident["faces"] and not allow_divergent:
+        kept = []
+        for e in embeddings:
+            best = min(
+                (evaluate_face_similarity(e["embedding"], f["embedding"],
+                                          threshold=SFACE_L2_THRESHOLD)
+                 for f in ident["faces"]),
+                key=lambda r: r[2],
+            )
+            if best[0]:
+                kept.append(e)
+            else:
+                rejected.append({
+                    "origin": e.get("origin", "unknown"),
+                    "euclidean_distance": best[2],
+                    "reason": (f"does not match any stored photo of "
+                               f"{ident['name']!r} (closest L2 {best[2]:.4f} > "
+                               f"{SFACE_L2_THRESHOLD}) - not stored, because "
+                               "mixing two people into one identity would make "
+                               "it match almost anybody"),
+                })
+        embeddings = kept
+
+    if not embeddings and rejected:
+        raise DivergentFace(rejected)
+
     for e in embeddings:
         ident["faces"].append({
             "added_at": now,
@@ -130,6 +176,9 @@ def enroll(
         })
 
     save_gallery(gallery)
+    if rejected:
+        ident = dict(ident)
+        ident["rejected_now"] = rejected
     return ident
 
 

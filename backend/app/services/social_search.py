@@ -499,6 +499,7 @@ async def run_social_search_and_verification_pipeline(
                 "candidates_verified": discovery["candidates_verified"],
                 "threshold_l2": discovery["threshold_l2"],
                 "candidate_report": discovery["candidate_report"],
+                "hint_report": discovery.get("hint_report", []),
             },
         },
     }

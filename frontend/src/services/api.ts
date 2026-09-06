@@ -372,6 +372,19 @@ export interface SearchDiagnostics {
   candidates_verified: number;
   threshold_l2?: number;
   candidate_report: CandidateReport[];
+  /** What happened to each URL pasted into the search hint. */
+  hint_report?: HintReportEntry[];
+}
+
+/**
+ * One URL from the search hint and its fate. 'blocked' means the host
+ * refuses anonymous requests, which is a fact about that site, not a
+ * failure the operator can retry their way out of.
+ */
+export interface HintReportEntry {
+  url: string;
+  status: 'fetched' | 'blocked' | 'no_image' | 'error';
+  detail: string;
 }
 
 /** Recomputes the fingerprint and compares it with what the chain holds. */
@@ -644,6 +657,10 @@ export interface TeachReference {
 }
 
 export interface TeachResult {
+  /** How the identity got its name: stated by the operator, or matched. */
+  name_source?: string;
+  /** Other enrolled identities this same face also matches. */
+  also_matches?: string[];
   success: boolean;
   identity: string;
   enrolled_faces: number;
@@ -660,6 +677,22 @@ export interface TeachResult {
  * cites is fetched and face-checked against the photo before anything is
  * stored - a claim on its own is never enough.
  */
+/**
+ * FastAPI reports refusals as {"detail": "..."} - and those details are the
+ * useful part here ("does not match any stored photo of X..."), so unwrap them
+ * rather than surfacing a JSON blob to the operator.
+ */
+async function errorDetail(res: Response, fallback: string): Promise<string> {
+  const body = await res.text().catch(() => '');
+  try {
+    const parsed = JSON.parse(body);
+    if (typeof parsed?.detail === 'string') return parsed.detail;
+  } catch {
+    /* not JSON - fall through to the raw text */
+  }
+  return body || fallback;
+}
+
 export async function teachIdentity(
   imageBase64: string,
   review: string,
@@ -674,8 +707,67 @@ export async function teachIdentity(
     }),
   });
   if (!res.ok) {
-    const t = await res.text().catch(() => res.statusText);
-    throw new Error(t || `Teach failed (${res.status})`);
+    throw new Error(await errorDetail(res, `Teach failed (${res.status})`));
+  }
+  return await res.json();
+}
+
+/* ────────────────────────────────────────────────────────────────────
+   Identity enrolment.
+
+   The registration page and 1-to-1 verification both feed the same
+   gallery the discovery pipeline checks first. Enrolling several photos
+   of one person taken at different times is what makes an older photo
+   keep matching: a probe is scored against the CLOSEST reference, not
+   an average, so range helps rather than dilutes.
+
+   Every image after the first is face-checked against the first by the
+   backend. A photo that fails comes back in `rejected` with its score
+   instead of being stored, because one mislabelled reference would make
+   the identity wrong permanently.
+   ──────────────────────────────────────────────────────────────────── */
+
+export interface EnrollScore {
+  euclidean_distance: number;
+  cosine_similarity: number;
+  similarity_percentage: number;
+  note: string;
+}
+
+export interface EnrollRejection {
+  index: number;
+  reason: string;
+  euclidean_distance?: number;
+  cosine_similarity?: number;
+}
+
+export interface EnrollResult {
+  success: boolean;
+  identity: string;
+  added_now: number;
+  total_references: number;
+  accepted: EnrollScore[];
+  rejected: EnrollRejection[];
+  threshold_used: number;
+}
+
+export async function enrollIdentity(
+  images: string[],
+  name: string,
+  note: string = '',
+  authorizedUse: boolean = false,
+  threshold?: number,
+): Promise<EnrollResult> {
+  const res = await fetch(`${API_BASE_URL}/api/social/gallery/enroll`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      images, name, note, authorized_use: authorizedUse,
+      ...(threshold ? { threshold } : {}),
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(await errorDetail(res, `Enrolment failed (${res.status})`));
   }
   return await res.json();
 }

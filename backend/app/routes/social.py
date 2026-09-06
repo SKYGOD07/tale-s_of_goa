@@ -1,6 +1,8 @@
+import cv2
+
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 
 from app.services.social_search import (
     run_social_search_and_verification_pipeline,
@@ -9,9 +11,13 @@ from app.services.social_search import (
 )
 from app.services.face_processor import encode_image_to_base64, models_ready, SFACE_L2_THRESHOLD
 from app.services.face_search import search_capabilities
-from app.services.gallery import gallery_summary, delete_identity, match_gallery
+from app.services.gallery import (
+    gallery_summary, delete_identity, match_gallery, enroll, DivergentFace,
+)
 from app.services.teach import teach_identity
-from app.services.face_processor import decode_base64_image, embed_primary_face
+from app.services.face_processor import (
+    decode_base64_image, embed_primary_face, evaluate_face_similarity,
+)
 from app.services.feedback import (
     record_feedback, feedback_stats, suggest_threshold, VALID_LABELS,
 )
@@ -93,6 +99,7 @@ async def search_and_verify_endpoint(payload: SocialSearchRequest):
                     "candidates_verified": d.get("candidates_verified", 0),
                     "threshold_l2": d.get("threshold_l2"),
                     "candidate_report": d.get("candidate_report", []),
+                    "hint_report": d.get("hint_report", []),
                 }
             },
         }
@@ -187,8 +194,120 @@ async def teach_endpoint(payload: TeachRequest):
     try:
         bgr = decode_base64_image(payload.image)
         return await teach_identity(bgr, payload.review, payload.name or "")
+    except DivergentFace as df:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(df)) from df
     except ValueError as ve:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
+
+
+class EnrollRequest(BaseModel):
+    """
+    Enrol photographs of one person under a name.
+
+    Used by the registration page (one capture) and by 1-to-1 verification
+    (both photos of a confirmed pair). Multiple images per identity is the
+    point: SFace scores a probe against the CLOSEST stored reference, so a
+    face enrolled from several photos taken at different times keeps matching
+    as it changes, which one reference photo does not.
+    """
+    images: List[str] = Field(..., min_length=1, max_length=10,
+                              description="Base64 photos of the SAME person")
+    name: str = Field(..., min_length=1, max_length=120)
+    note: Optional[str] = Field("", max_length=2000)
+    threshold: Optional[float] = Field(None, ge=0.20, le=1.60)
+    authorized_use: bool = Field(..., description="Caller confirms authorisation to enrol this face")
+
+
+@router.post("/gallery/enroll")
+def gallery_enroll_endpoint(payload: EnrollRequest):
+    """
+    Enrol verified photos of one identity.
+
+    Every image after the first is face-checked against the first before it is
+    stored. Enrolling on the operator's word alone would let one mislabelled
+    photo poison the identity permanently, and the system would then repeat
+    that error confidently - so a mismatched image is rejected with its score
+    rather than accepted.
+
+    Enrolled photos are marked NOT web-reachable: they are local files, not
+    discovered posts, so they can improve recognition but can never be
+    presented as a search result.
+    """
+    if not payload.authorized_use:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Enrolling a face requires the authorisation acknowledgement.",
+        )
+
+    threshold = payload.threshold or SFACE_L2_THRESHOLD
+    accepted: List[Dict[str, Any]] = []
+    rejected: List[Dict[str, Any]] = []
+    anchor: Optional[List[float]] = None
+
+    for i, img_b64 in enumerate(payload.images):
+        try:
+            bgr = decode_base64_image(img_b64)
+            face = embed_primary_face(bgr)
+        except Exception as e:
+            rejected.append({"index": i, "reason": f"no usable face ({e})"})
+            continue
+
+        emb = face["embedding"]
+        if anchor is None:
+            anchor = emb
+            score = {"euclidean_distance": 0.0, "cosine_similarity": 1.0,
+                     "similarity_percentage": 100.0, "note": "reference image"}
+        else:
+            is_match, pct, l2, cos = evaluate_face_similarity(anchor, emb, threshold=threshold)
+            if not is_match:
+                rejected.append({
+                    "index": i,
+                    "reason": (f"does not match the first image (L2 {l2:.4f} > {threshold}) "
+                               "- enrolling it would corrupt this identity"),
+                    "euclidean_distance": l2,
+                    "cosine_similarity": cos,
+                })
+                continue
+            score = {"euclidean_distance": l2, "cosine_similarity": cos,
+                     "similarity_percentage": pct, "note": "verified against the reference"}
+
+        accepted.append({
+            "embedding": emb,
+            "origin": f"enrolled photo #{i + 1}",
+            "image_url": "",
+            "platform": "operator",
+            "media_sha256": "",
+            "web_reachable": False,
+            "thumbnail": encode_image_to_base64(
+                cv2.resize(face["display_crop"], (96, 96))
+            ),
+            "_score": score,
+        })
+
+    if not accepted:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Nothing could be enrolled: " +
+                   "; ".join(r["reason"] for r in rejected),
+        )
+
+    scores = [a.pop("_score") for a in accepted]
+    try:
+        identity = enroll(name=payload.name, embeddings=accepted, review=payload.note or "")
+    except DivergentFace as df:
+        # The name already belongs to someone whose face this is not.
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                            detail=str(df)) from df
+
+    return {
+        "success": True,
+        "identity": identity["name"],
+        "added_now": len(accepted),
+        "total_references": len(identity["faces"]),
+        "accepted": scores,
+        "rejected": rejected,
+        "threshold_used": threshold,
+    }
 
 
 @router.get("/gallery")
