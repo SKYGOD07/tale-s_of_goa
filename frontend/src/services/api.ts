@@ -329,6 +329,10 @@ export interface DiscoveredPost {
   title: string;
   description: string;
   image_url: string;
+  /** SHA-256 of the exact public media bytes used for face verification. */
+  media_sha256?: string;
+  /** Live discovery mechanism that produced this candidate. */
+  discovery_source?: string;
   post_face_crop_base64?: string;
 }
 
@@ -408,7 +412,8 @@ export interface SocialSearchPipelineResponse {
 export async function runSocialSearchPipeline(
   imageBase64: string,
   query: string = '',
-  threshold: number = 1.128
+  threshold: number = 1.128,
+  authorizedUse: boolean = false,
 ): Promise<SocialSearchPipelineResponse> {
   try {
     const res = await fetch(`${API_BASE_URL}/api/social/search-and-verify`, {
@@ -418,6 +423,7 @@ export async function runSocialSearchPipeline(
         image: imageBase64,
         query: query,
         threshold: threshold,
+        authorized_use: authorizedUse,
       }),
     });
 
