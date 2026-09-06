@@ -138,6 +138,7 @@ export function IntroExperience({ open, onClose }: Props) {
   }, [open]);
 
   const close = useCallback(() => {
+    console.trace('[intro] close() called');
     setClosing(true);
     try { localStorage.setItem(SEEN_KEY, '1'); } catch { /* ignore */ }
     // Let the exit animation finish before unmounting. 320ms matches
