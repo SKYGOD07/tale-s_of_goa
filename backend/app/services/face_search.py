@@ -25,6 +25,7 @@ Either way the verification stage is identical and mandatory.
 
 import io
 import os
+import hashlib
 import urllib.parse
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -76,6 +77,7 @@ class Candidate:
     is_match: bool = False
     image_bgr: Optional[np.ndarray] = None
     image_bytes: Optional[bytes] = None
+    media_sha256: str = ""
     face_crop_b64: str = ""
     error: str = ""
 
@@ -93,6 +95,7 @@ class Candidate:
             "euclidean_distance": self.best_l2,
             "similarity_percentage": self.similarity_pct,
             "is_match": self.is_match,
+            "media_sha256": self.media_sha256 or None,
             "error": self.error or None,
         }
 
@@ -287,6 +290,9 @@ async def verify_candidate(candidate: Candidate, scan_embedding: List[float],
         return candidate
 
     candidate.image_bytes, candidate.image_bgr = downloaded
+    # Fingerprint the exact public media bytes that were verified. The image
+    # itself remains off-chain; only this digest enters the canonical record.
+    candidate.media_sha256 = hashlib.sha256(candidate.image_bytes).hexdigest()
 
     try:
         detections, _, _ = detect_faces_detailed(candidate.image_bgr)
