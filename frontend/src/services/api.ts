@@ -329,6 +329,10 @@ export interface DiscoveredPost {
   title: string;
   description: string;
   image_url: string;
+  /** SHA-256 of the exact public media bytes used for face verification. */
+  media_sha256?: string;
+  /** Live discovery mechanism that produced this candidate. */
+  discovery_source?: string;
   post_face_crop_base64?: string;
 }
 
@@ -368,6 +372,19 @@ export interface SearchDiagnostics {
   candidates_verified: number;
   threshold_l2?: number;
   candidate_report: CandidateReport[];
+  /** What happened to each URL pasted into the search hint. */
+  hint_report?: HintReportEntry[];
+}
+
+/**
+ * One URL from the search hint and its fate. 'blocked' means the host
+ * refuses anonymous requests, which is a fact about that site, not a
+ * failure the operator can retry their way out of.
+ */
+export interface HintReportEntry {
+  url: string;
+  status: 'fetched' | 'blocked' | 'no_image' | 'error';
+  detail: string;
 }
 
 /** Recomputes the fingerprint and compares it with what the chain holds. */
@@ -390,6 +407,8 @@ export interface SocialSearchPipelineResponse {
     crop_base64?: string;
     image_width: number;
     image_height: number;
+    /** The searching face, so a rejection can be scoped to it. */
+    embedding?: number[];
   };
   discovered_post: DiscoveredPost;
   metrics: PipelineMetrics;
@@ -397,6 +416,16 @@ export interface SocialSearchPipelineResponse {
   canonical_record: any;
   blockchain_upload: VerificationResponse;
   onchain_reverification: VerificationQueryResponse;
+  /** Recognised from the enrolled gallery, before any web search. */
+  known_identity?: KnownIdentity | null;
+  gallery?: {
+    enrolled_identities: number;
+    enrolled_faces: number;
+    top_scores?: KnownIdentity[];
+  };
+  /** Every candidate that passed the threshold, best first. */
+  all_matches?: MatchResult[];
+  match_count?: number;
   tamper_check?: TamperCheck;
   diagnostics?: {
     input_scan?: Record<string, any>;
@@ -408,7 +437,12 @@ export interface SocialSearchPipelineResponse {
 export async function runSocialSearchPipeline(
   imageBase64: string,
   query: string = '',
-  threshold: number = 1.128
+  threshold: number = 1.128,
+  authorizedUse: boolean = false,
+  // Manual overrides for photos the detector frames differently from the
+  // operator: point at one person, or pick a different detected face.
+  cropRegion: { left: number; top: number; right: number; bottom: number } | null = null,
+  faceIndex: number = 0,
 ): Promise<SocialSearchPipelineResponse> {
   try {
     const res = await fetch(`${API_BASE_URL}/api/social/search-and-verify`, {
@@ -418,6 +452,9 @@ export async function runSocialSearchPipeline(
         image: imageBase64,
         query: query,
         threshold: threshold,
+        authorized_use: authorizedUse,
+        crop_region: cropRegion,
+        face_index: faceIndex,
       }),
     });
 
@@ -529,5 +566,208 @@ export interface CapabilitiesResponse {
 export async function getSearchCapabilities(): Promise<CapabilitiesResponse> {
   const res = await fetch(`${API_BASE_URL}/api/social/capabilities`);
   if (!res.ok) throw new Error(`Capabilities unavailable (${res.status})`);
+  return await res.json();
+}
+
+/** An identity the system has been taught and now recognises directly. */
+export interface KnownIdentity {
+  name: string;
+  source_urls: string[];
+  reference_count: number;
+  similarity_percentage: number;
+  euclidean_distance: number;
+  cosine_similarity: number;
+  matched_origin: string;
+  thumbnail?: string;
+  is_match: boolean;
+}
+
+/** One candidate that passed the biometric gate. */
+export interface MatchResult {
+  url: string;
+  platform: string;
+  author: string;
+  title: string;
+  image_url: string;
+  face_crop_base64?: string;
+  media_sha256?: string;
+  discovery_source?: string;
+  similarity_percentage: number;
+  euclidean_distance: number;
+  cosine_similarity: number;
+  faces_found: number;
+}
+
+export interface FeedbackPayload {
+  label: 'correct' | 'incorrect' | 'unsure';
+  euclidean_distance: number;
+  cosine_similarity?: number;
+  threshold_used?: number;
+  system_verdict?: boolean;
+  page_url?: string;
+  platform?: string;
+  discovery_source?: string;
+  media_sha256?: string;
+  record_hash?: string;
+  /** Free-text justification, stored verbatim. */
+  note?: string;
+  /** Anchor this review's SHA-256 on the blockchain. */
+  commit_on_chain?: boolean;
+  /** The searching face, so a rejection applies only to it. */
+  probe_embedding?: number[];
+}
+
+export interface FeedbackStats {
+  stats: {
+    total: number; correct: number; incorrect: number; unsure: number;
+    agreement_rate: number | null; path: string;
+  };
+  calibration: {
+    samples: number; same_person: number; different_person: number;
+    suggested_threshold: number | null; balanced_accuracy: number | null;
+    published_default: number; confident: boolean; message: string;
+  };
+}
+
+/** Record whether a returned match was actually the right person. */
+export async function submitFeedback(payload: FeedbackPayload) {
+  const res = await fetch(`${API_BASE_URL}/api/social/feedback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(`Feedback failed (${res.status})`);
+  return await res.json();
+}
+
+export async function getFeedbackStats(): Promise<FeedbackStats> {
+  const res = await fetch(`${API_BASE_URL}/api/social/feedback/stats`);
+  if (!res.ok) throw new Error(`Stats unavailable (${res.status})`);
+  return await res.json();
+}
+
+export interface TeachReference {
+  url: string;
+  platform: string;
+  status: 'verified' | 'unverified' | 'rejected' | 'skipped' | 'error';
+  reason?: string;
+  similarity_percentage?: number;
+  euclidean_distance?: number;
+  image_url?: string;
+}
+
+export interface TeachResult {
+  /** How the identity got its name: stated by the operator, or matched. */
+  name_source?: string;
+  /** Other enrolled identities this same face also matches. */
+  also_matches?: string[];
+  success: boolean;
+  identity: string;
+  enrolled_faces: number;
+  added_now: number;
+  references: TeachReference[];
+  verified_count: number;
+  unverified_count: number;
+  rejected_count: number;
+  threshold_used: number;
+}
+
+/**
+ * Teach the system an identity from a written review. Whatever the review
+ * cites is fetched and face-checked against the photo before anything is
+ * stored - a claim on its own is never enough.
+ */
+/**
+ * FastAPI reports refusals as {"detail": "..."} - and those details are the
+ * useful part here ("does not match any stored photo of X..."), so unwrap them
+ * rather than surfacing a JSON blob to the operator.
+ */
+async function errorDetail(res: Response, fallback: string): Promise<string> {
+  const body = await res.text().catch(() => '');
+  try {
+    const parsed = JSON.parse(body);
+    if (typeof parsed?.detail === 'string') return parsed.detail;
+  } catch {
+    /* not JSON - fall through to the raw text */
+  }
+  return body || fallback;
+}
+
+export async function teachIdentity(
+  imageBase64: string,
+  review: string,
+  name: string = '',
+  authorizedUse: boolean = false,
+): Promise<TeachResult> {
+  const res = await fetch(`${API_BASE_URL}/api/social/teach`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      image: imageBase64, review, name, authorized_use: authorizedUse,
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(await errorDetail(res, `Teach failed (${res.status})`));
+  }
+  return await res.json();
+}
+
+/* ────────────────────────────────────────────────────────────────────
+   Identity enrolment.
+
+   The registration page and 1-to-1 verification both feed the same
+   gallery the discovery pipeline checks first. Enrolling several photos
+   of one person taken at different times is what makes an older photo
+   keep matching: a probe is scored against the CLOSEST reference, not
+   an average, so range helps rather than dilutes.
+
+   Every image after the first is face-checked against the first by the
+   backend. A photo that fails comes back in `rejected` with its score
+   instead of being stored, because one mislabelled reference would make
+   the identity wrong permanently.
+   ──────────────────────────────────────────────────────────────────── */
+
+export interface EnrollScore {
+  euclidean_distance: number;
+  cosine_similarity: number;
+  similarity_percentage: number;
+  note: string;
+}
+
+export interface EnrollRejection {
+  index: number;
+  reason: string;
+  euclidean_distance?: number;
+  cosine_similarity?: number;
+}
+
+export interface EnrollResult {
+  success: boolean;
+  identity: string;
+  added_now: number;
+  total_references: number;
+  accepted: EnrollScore[];
+  rejected: EnrollRejection[];
+  threshold_used: number;
+}
+
+export async function enrollIdentity(
+  images: string[],
+  name: string,
+  note: string = '',
+  authorizedUse: boolean = false,
+  threshold?: number,
+): Promise<EnrollResult> {
+  const res = await fetch(`${API_BASE_URL}/api/social/gallery/enroll`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      images, name, note, authorized_use: authorizedUse,
+      ...(threshold ? { threshold } : {}),
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(await errorDetail(res, `Enrolment failed (${res.status})`));
+  }
   return await res.json();
 }

@@ -17,7 +17,9 @@ from app.services.face_processor import (
     embed_primary_face, encode_face, feature_to_list, evaluate_face_similarity,
     encode_image_to_base64, describe_pipeline, SFACE_L2_THRESHOLD
 )
-from app.services.face_search import discover_matching_post, search_capabilities
+from app.services.face_search import (
+    discover_matching_post, search_capabilities, Candidate, detect_platform,
+)
 from app.services.hashing import generate_canonical_hash
 from app.services.blockchain import submit_record_hash_to_blockchain, query_verification_record
 
@@ -238,6 +240,8 @@ async def discover_real_social_post(query: str) -> Optional[Dict[str, Any]]:
 async def run_social_search_and_verification_pipeline(
     face_input_b64: str,
     search_query: str = "",
+    face_index: int = 0,
+    crop_region: Optional[Dict[str, int]] = None,
     threshold: float = SFACE_L2_THRESHOLD
 ) -> Dict[str, Any]:
     """
@@ -256,7 +260,18 @@ async def run_social_search_and_verification_pipeline(
     """
     # ── 1. Input face ────────────────────────────────────────────────────
     scan_bgr = decode_base64_image(face_input_b64)
-    scan = embed_primary_face(scan_bgr)          # raises if no face present
+    scan = embed_primary_face(scan_bgr, face_index=face_index, crop_region=crop_region)
+
+    # Check what the system has already been taught BEFORE going to the web.
+    # An enrolled identity is offline, instant, and unaffected by whether the
+    # person happens to be publicly indexed - which is the whole point of
+    # teaching it in the first place.
+    from app.services.gallery import match_gallery
+    gallery_hit = match_gallery(scan["embedding"], threshold=threshold)
+    if gallery_hit["match"]:
+        g = gallery_hit["match"]
+        print(f"[Gallery] known identity: {g['name']} "
+              f"(L2 {g['euclidean_distance']:.4f} via {g['matched_origin']})")
     scan_diag = describe_pipeline(scan_bgr, scan, "input_scan")
     print(f"[Pipeline] input scan: {scan_diag}")
 
@@ -273,6 +288,66 @@ async def run_social_search_and_verification_pipeline(
     )
 
     match = discovery["match"]
+    all_matches = discovery.get("matches") or []
+
+    # An enrolled identity outranks anything the web search guessed.
+    #
+    # Reverse image search retrieves on overall visual similarity, so its top
+    # hit is regularly a stranger in similar glasses. A gallery entry is the
+    # opposite: the operator asserted it and every reference face was verified
+    # against the probe before being stored. When memory recognises the face,
+    # that is the answer - and continuing to headline a web look-alike would be
+    # showing a known-wrong result to someone who has already corrected it.
+    gallery_primary = None
+    gallery_profiles = []
+    if gallery_hit["match"]:
+        g = gallery_hit["match"]
+
+        # Task 3 wants a real, matching post - so the result must be a profile
+        # that exists on the web and whose OWN photo matched. The operator's
+        # copy of the picture is excluded: scoring a photo against itself gives
+        # L2 0.0 and proves nothing, and a local file is not a discovered post.
+        passing = [pr for pr in g.get("profiles", []) if pr["is_match"]]
+
+        for pr in passing:
+            cand = Candidate(
+                page_url=pr["url"],
+                image_url=pr["image_url"] or pr["thumbnail"],
+                title=f"{g['name']} - {pr['platform'] or detect_platform(pr['url'])} profile",
+                description=(
+                    f"Enrolled identity. This profile's own photo matches the scan at "
+                    f"L2 {pr['euclidean_distance']:.4f}."
+                ),
+                author=g["name"],
+                platform=pr["platform"] or detect_platform(pr["url"]),
+                source="gallery:verified_profile",
+            )
+            cand.faces_found = 1
+            cand.best_l2 = pr["euclidean_distance"]
+            cand.best_cosine = pr["cosine_similarity"]
+            cand.similarity_pct = pr["similarity_percentage"]
+            cand.is_match = True
+            cand.face_crop_b64 = pr["thumbnail"]
+            cand.media_sha256 = pr["media_sha256"]
+            gallery_profiles.append(cand)
+
+        if gallery_profiles:
+            gallery_primary = gallery_profiles[0]
+            if match is None or gallery_primary.best_l2 <= (match.best_l2 or 9.9):
+                print(f"[Pipeline] enrolled profile outranks the web result: "
+                      f"{gallery_primary.page_url} (L2 {gallery_primary.best_l2:.4f})")
+                match = gallery_primary
+                known_urls = {c.page_url for c in gallery_profiles}
+                all_matches = gallery_profiles + [
+                    m for m in all_matches if m.page_url not in known_urls
+                ]
+        else:
+            # Recognised, but every stored reference is the operator's own copy.
+            # There is nothing web-reachable to present, so the web result (or
+            # an honest no-match) stands and the banner still names the person.
+            print(f"[Pipeline] recognised {g['name']}, but no web-reachable "
+                  f"profile is enrolled for them - teach one to surface it")
+
     if match is None:
         detail = discovery.get("note") or (
             f"{discovery['candidates_verified']} candidate image(s) were checked; "
@@ -280,7 +355,12 @@ async def run_social_search_and_verification_pipeline(
         )
         raise NoMatchFound(
             "No matching public social media post found. " + detail,
-            discovery=discovery,
+            discovery={**discovery, "known_identity": gallery_hit["match"],
+                       "gallery": {
+                           "enrolled_identities": gallery_hit["enrolled_identities"],
+                           "enrolled_faces": gallery_hit["enrolled_faces"],
+                           "top_scores": gallery_hit["all_scored"][:3],
+                       }},
         )
 
     # ── 4. Canonical record + fingerprint ────────────────────────────────
@@ -296,6 +376,8 @@ async def run_social_search_and_verification_pipeline(
             "title": match.title,
             "description": match.description,
             "image_url": match.image_url,
+            "media_sha256": match.media_sha256,
+            "discovery_source": match.source,
         },
         "verification_metrics": {
             "similarity_percentage": match.similarity_pct,
@@ -343,6 +425,9 @@ async def run_social_search_and_verification_pipeline(
             "crop_base64": scan_crop_b64,
             "image_width": scan["image_width"],
             "image_height": scan["image_height"],
+            # Returned so "not them" can be scoped to this face rather than
+            # blocking an image for every future search.
+            "embedding": scan["embedding"],
         },
         "discovered_post": {
             "url": match.page_url,
@@ -351,6 +436,8 @@ async def run_social_search_and_verification_pipeline(
             "title": match.title,
             "description": match.description,
             "image_url": match.image_url,
+            "media_sha256": match.media_sha256,
+            "discovery_source": match.source,
             "post_face_crop_base64": match.face_crop_b64,
         },
         "metrics": {
@@ -358,6 +445,45 @@ async def run_social_search_and_verification_pipeline(
             "euclidean_distance": match.best_l2,
             "cosine_similarity": match.best_cosine,
             "is_match": True,
+        },
+        "all_matches": [
+            {
+                "url": m.page_url,
+                "platform": m.platform,
+                "author": m.author or m.title or m.page_url,
+                "title": m.title,
+                "image_url": m.image_url,
+                "face_crop_base64": m.face_crop_b64,
+                "media_sha256": m.media_sha256,
+                "discovery_source": m.source,
+                "similarity_percentage": m.similarity_pct,
+                "euclidean_distance": m.best_l2,
+                "cosine_similarity": m.best_cosine,
+                "faces_found": m.faces_found,
+            }
+            for m in all_matches
+        ],
+        "match_count": len(all_matches),
+        "known_identity": gallery_hit["match"],
+        "identity_profiles": [
+            {
+                "url": c.page_url,
+                "platform": c.platform,
+                "image_url": c.image_url,
+                "face_crop_base64": c.face_crop_b64,
+                "media_sha256": c.media_sha256,
+                "similarity_percentage": c.similarity_pct,
+                "euclidean_distance": c.best_l2,
+                "cosine_similarity": c.best_cosine,
+                "verified": True,
+            }
+            for c in gallery_profiles
+        ],
+        "asserted_profiles": (gallery_hit["match"] or {}).get("asserted_profiles", []),
+        "gallery": {
+            "enrolled_identities": gallery_hit["enrolled_identities"],
+            "enrolled_faces": gallery_hit["enrolled_faces"],
+            "top_scores": gallery_hit["all_scored"][:3],
         },
         "record_hash": bytes32_record_hash,
         "canonical_record": canonical_record,
@@ -373,6 +499,7 @@ async def run_social_search_and_verification_pipeline(
                 "candidates_verified": discovery["candidates_verified"],
                 "threshold_l2": discovery["threshold_l2"],
                 "candidate_report": discovery["candidate_report"],
+                "hint_report": discovery.get("hint_report", []),
             },
         },
     }

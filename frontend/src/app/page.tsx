@@ -13,6 +13,7 @@ import { SocialDiscoveryPipeline } from '../components/SocialDiscoveryPipeline';
 import {
   detectFace,
   encodeFace,
+  enrollIdentity,
   recordVerification,
   getChainStatus,
   ChainStatus,
@@ -87,6 +88,16 @@ export default function Home() {
   const [embedding, setEmbedding] = useState<number[]>([]);
   const [recordHash, setRecordHash] = useState<string>('');
   const [verificationResult, setVerificationResult] = useState<VerificationResponse | null>(null);
+
+  /* Registration is the natural enrolment point: it is the one place the
+     operator supplies a name alongside a face. Naming a capture stores it as a
+     reference for that identity, so the discovery pipeline recognises the
+     person directly instead of depending on a search engine having indexed
+     them. Leaving the name blank still produces the on-chain proof — the
+     capture is simply not remembered. */
+  const [registerName, setRegisterName] = useState<string>('');
+  const [registerAuthorized, setRegisterAuthorized] = useState<boolean>(false);
+  const [enrollNote, setEnrollNote] = useState<string>('');
 
   // Periodically check Python FastAPI backend status (every 3 seconds)
   useEffect(() => {
@@ -227,6 +238,28 @@ export default function Home() {
       setStatusMessage(
         verifyRes.simulated ? 'RECORDED IN SIMULATION — NOT BROADCAST' : 'FACE ID VERIFICATION CONFIRMED'
       );
+
+      // Enrolment is separate from the proof and must not be able to break it:
+      // the record is already on-chain by this point, so a failure here is
+      // reported without unwinding a verification that genuinely happened.
+      if (registerName.trim()) {
+        try {
+          const en = await enrollIdentity(
+            [currentFrame],
+            registerName.trim(),
+            'Enrolled from the registration page.',
+            registerAuthorized,
+          );
+          setEnrollNote(
+            `Remembered as “${en.identity}” — ${en.total_references} reference ` +
+            `photo${en.total_references === 1 ? '' : 's'} on file.`
+          );
+        } catch (e: any) {
+          setEnrollNote(`Proof recorded, but enrolment failed: ${e?.message || 'unknown error'}`);
+        }
+      } else {
+        setEnrollNote('');
+      }
     } catch (err: any) {
       console.error('[Capture & Verify Error]', err);
       alert(`Pipeline error: ${err.message || 'Verification failed'}`);
@@ -320,8 +353,8 @@ export default function Home() {
                   }}
                 >
                   A 128-dimensional biometric embedding, reduced to a canonical SHA-256 record
-                  hash and anchored to an Ethereum smart contract. No image or vector ever
-                  leaves the machine.
+                  hash and anchored to an Ethereum smart contract. The blockchain receives no
+                  image or vector.
                 </p>
               </div>
 
@@ -515,19 +548,19 @@ export default function Home() {
                     {[
                       {
                         t: 'Detect',
-                        d: 'OpenCV isolates the facial bounding box from the live frame.',
+                        d: 'YuNet returns the facial bounding box and five landmarks — both eyes, the nose tip and the mouth corners.',
                       },
                       {
-                        t: 'Normalise',
-                        d: 'The crop is converted to 8-bit grayscale and histogram-equalised, so lighting and contrast stop influencing the vector.',
+                        t: 'Align',
+                        d: 'SFace.alignCrop() warps the face onto those landmarks, producing a 112×112 colour crop with the eyes in a fixed position. A plain resize instead of this step is what made earlier matching unreliable.',
                       },
                       {
                         t: 'Embed',
-                        d: 'The normalised crop is encoded as an L2-normalised 128-dimensional vector.',
+                        d: 'SFace encodes the aligned crop as a 128-dimensional identity vector. Match decisions use L2 distance against SFace’s published operating point of 1.128.',
                       },
                       {
-                        t: 'Commit',
-                        d: 'The canonical record is hashed with SHA-256 and written to the smart contract. Only the 32-byte hash goes on-chain.',
+                        t: 'Remember & commit',
+                        d: 'Named captures are stored as a reference for this identity, and the canonical record is hashed with SHA-256 and written to the smart contract. Only the 32-byte hash goes on-chain — never the image or the vector.',
                       },
                     ].map((step, i) => (
                       <li
@@ -631,12 +664,68 @@ export default function Home() {
                     )}
                   </div>
 
-                  <CaptureButton
-                    onCapture={handleCaptureAndVerify}
-                    disabled={!pipelineStatus.faceDetected || pipelineStatus.faceCount !== 1}
-                    isProcessing={pipelineStatus.isProcessing}
-                    faceCount={pipelineStatus.faceCount}
-                  />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div>
+                      <span className="eyebrow">Identity (optional)</span>
+                      <input
+                        value={registerName}
+                        onChange={(e) => setRegisterName(e.target.value)}
+                        placeholder="Name — leave blank to record the proof only"
+                        style={{
+                          width: '100%',
+                          marginTop: 6,
+                          background: 'var(--surface-sunken)',
+                          border: '1px solid var(--rule)',
+                          borderRadius: 8,
+                          padding: '0.5rem 0.7rem',
+                          color: 'var(--ink)',
+                          fontSize: 'var(--t-small)',
+                          fontFamily: 'inherit',
+                        }}
+                      />
+                    </div>
+
+                    {registerName.trim() !== '' && (
+                      <label style={{
+                        display: 'flex', alignItems: 'flex-start', gap: 8,
+                        fontSize: 'var(--t-micro)', color: 'var(--ink-faint)', lineHeight: 1.5,
+                      }}>
+                        <input
+                          type="checkbox"
+                          checked={registerAuthorized}
+                          onChange={(e) => setRegisterAuthorized(e.target.checked)}
+                          style={{ marginTop: 2 }}
+                        />
+                        <span>
+                          I am authorised to store this face as biometric reference data.
+                          Naming a capture keeps a 128-D vector and a thumbnail, never the
+                          full photograph; it can be erased with{' '}
+                          <code>DELETE /api/social/gallery/&lt;name&gt;</code>.
+                        </span>
+                      </label>
+                    )}
+
+                    <CaptureButton
+                      onCapture={handleCaptureAndVerify}
+                      disabled={
+                        !pipelineStatus.faceDetected ||
+                        pipelineStatus.faceCount !== 1 ||
+                        (registerName.trim() !== '' && !registerAuthorized)
+                      }
+                      isProcessing={pipelineStatus.isProcessing}
+                      faceCount={pipelineStatus.faceCount}
+                    />
+
+                    {enrollNote && (
+                      <div style={{
+                        fontSize: 'var(--t-micro)',
+                        color: enrollNote.startsWith('Proof recorded, but') ? '#e8c46a' : '#a9e3b4',
+                        lineHeight: 1.5,
+                      }}>
+                        {enrollNote}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
 

@@ -227,6 +227,7 @@ blockchain → re-verify.
 {
   "image": "data:image/jpeg;base64,…",
   "query": "Serena Williams",
+  "authorized_use": true,
   "threshold": 1.128
 }
 ```
@@ -235,7 +236,8 @@ blockchain → re-verify.
 |---|---|---|---|
 | `image` | string | — | The input face scan |
 | `query` | string | `""` | Search hint. **Omit for pure face-driven discovery** (needs a reverse-image key) |
-| `threshold` | float | `1.128` | L2 |
+| `authorized_use` | bool | — | Required acknowledgement that the caller is authorized to use the image |
+| `threshold` | float | `1.128` | L2. Keep the published SFace operating point; do not widen to force a match. |
 
 ### Response — match found (`200`)
 
@@ -253,6 +255,8 @@ blockchain → re-verify.
     "author": "Serena Williams turns heads as tennis legend shows off…",
     "title": "…", "description": "…",
     "image_url": "https://www.the-sun.com/wp-content/uploads/…jpg",
+    "media_sha256": "7efbe8…e37a",
+    "discovery_source": "live:ddg_images",
     "post_face_crop_base64": "data:image/jpeg;base64,…"
   },
   "metrics": {
@@ -301,7 +305,7 @@ blockchain → re-verify.
         { "page_url": "…", "image_url": "…", "source": "live:ddg_images",
           "faces_found": 1, "cosine_similarity": 0.6075,
           "euclidean_distance": 0.886, "similarity_percentage": 69.2,
-          "is_match": true, "error": null }
+          "is_match": true, "media_sha256": "7efbe8…e37a", "error": null }
       ]
     }
   }

@@ -7,7 +7,7 @@ from app.schemas.face import (
 from app.services.face_processor import (
     decode_base64_image, detect_faces, detect_faces_detailed, crop_face_region,
     embed_primary_face, evaluate_face_similarity, describe_pipeline,
-    extract_pixel_stats, process_face_transformations
+    extract_pixel_stats, process_face_transformations, SFACE_L2_THRESHOLD
 )
 from app.services.hashing import compute_record_hash, compute_comparison_record_hash
 from app.services.blockchain import submit_record_hash_to_blockchain
@@ -190,7 +190,7 @@ def compare_faces_endpoint(payload: CompareRequest):
                 similarity_percentage=0.0,
                 euclidean_distance=2.0,
                 cosine_similarity=0.0,
-                threshold_used=payload.threshold or 0.60,
+                threshold_used=payload.threshold or SFACE_L2_THRESHOLD,
                 status_message="No face detected in Live Camera image (Image A)",
                 face_a_detected=False,
                 face_b_detected=face_b_detected,
@@ -204,7 +204,7 @@ def compare_faces_endpoint(payload: CompareRequest):
                 similarity_percentage=0.0,
                 euclidean_distance=2.0,
                 cosine_similarity=0.0,
-                threshold_used=payload.threshold or 0.60,
+                threshold_used=payload.threshold or SFACE_L2_THRESHOLD,
                 status_message="No face detected in Reference / Social image (Image B)",
                 face_a_detected=True,
                 face_b_detected=False,
@@ -258,7 +258,7 @@ def compare_faces_endpoint(payload: CompareRequest):
         print("[COMPARE] A:", describe_pipeline(img_a_bgr, result_a, "image_a"))
         print("[COMPARE] B:", describe_pipeline(img_b_bgr, result_b, "image_b"))
 
-        threshold = payload.threshold or 0.60
+        threshold = payload.threshold or SFACE_L2_THRESHOLD
         is_match, sim_pct, euc_dist, cos_sim = evaluate_face_similarity(emb_a, emb_b, threshold)
         verdict_str = "MATCH VERIFIED" if is_match else "MISMATCH / DIFFERENT IDENTITY"
 
@@ -312,7 +312,7 @@ def compare_faces_endpoint(payload: CompareRequest):
             similarity_percentage=0.0,
             euclidean_distance=2.0,
             cosine_similarity=0.0,
-            threshold_used=payload.threshold or 0.60,
+            threshold_used=payload.threshold or SFACE_L2_THRESHOLD,
             status_message=f"Comparison pipeline error: {str(e)}",
             face_a_detected=False,
             face_b_detected=False,

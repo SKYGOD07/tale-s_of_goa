@@ -72,6 +72,18 @@ def test_invalid_image():
     assert response.status_code == 400
     print("[TEST 4/10 PASSED] Invalid image handling and HTTP 400 response verified.")
 
+# 4a. Social discovery refuses an unconfirmed face-search request before it
+# attempts face detection or any external lookup.
+def test_social_search_requires_authorized_use():
+    response = client.post("/api/social/search-and-verify", json={
+        "image": "not_a_valid_base64_string",
+        "query": "public handle",
+        "authorized_use": False,
+    })
+    assert response.status_code == 400
+    assert "authorized" in response.json()["detail"].lower()
+    print("[TEST 4A PASSED] Social discovery authorization gate verified.")
+
 # 5. Test: Embedding dimension (strictly 128 numerical values normalized on unit sphere)
 def test_embedding_dimension_exact_128():
     img_b64 = create_synthetic_face_b64()
@@ -199,6 +211,7 @@ if __name__ == "__main__":
     test_single_face_crop()
     test_multiple_faces_logic()
     test_invalid_image()
+    test_social_search_requires_authorized_use()
     test_embedding_dimension_exact_128()
     test_1_to_1_similarity_metrics()
     test_canonical_hash_generation()
