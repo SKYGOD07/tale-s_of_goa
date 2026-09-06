@@ -8,10 +8,12 @@ import {
   SearchCapabilities,
 } from '../services/api';
 
+const MATCH_THRESHOLD = 1.128;
+
 export function SocialDiscoveryPipeline() {
   const [inputImage, setInputImage] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [threshold, setThreshold] = useState<number>(1.128);
+  const [authorizedUse, setAuthorizedUse] = useState(false);
   // The no-match panel offers a one-click route to the hint field, which is
   // collapsed by default and therefore easy to miss.
   // What the backend can actually do. The panel below must describe this
@@ -61,6 +63,15 @@ export function SocialDiscoveryPipeline() {
       setErrorMsg('Please upload or provide a face scan image first.');
       return;
     }
+    if (!authorizedUse) {
+      setErrorMsg('Confirm that you are authorized to use this image before starting a face search.');
+      return;
+    }
+    if (caps && !caps.reverse_image_available && !searchQuery.trim()) {
+      setErrorMsg('Enter a public name, handle or URL so the live search has a discovery hint.');
+      focusHint();
+      return;
+    }
 
     setLoading(true);
     setErrorMsg(null);
@@ -71,7 +82,12 @@ export function SocialDiscoveryPipeline() {
       setTimeout(() => setStepState(2), 500); // Searching web
       setTimeout(() => setStepState(3), 1200); // Blockchain
 
-      const data = await runSocialSearchPipeline(inputImage, searchQuery, threshold);
+      const data = await runSocialSearchPipeline(
+        inputImage,
+        searchQuery,
+        MATCH_THRESHOLD,
+        authorizedUse,
+      );
 
       if (!data.success) {
         setErrorMsg(data.error || 'Failed to complete pipeline');
@@ -286,22 +302,25 @@ export function SocialDiscoveryPipeline() {
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'rgba(255,255,255,0.62)', marginBottom: '0.25rem' }}>
                 <span>Match Threshold (L₂ distance)</span>
-                <span style={{ color: '#d3e3bb', fontWeight: 400 }}>{threshold.toFixed(2)}</span>
+                <span style={{ color: '#d3e3bb', fontWeight: 400 }}>{MATCH_THRESHOLD.toFixed(3)}</span>
               </div>
               <input
                 type="range"
                 min="0.60"
                 max="1.40"
                 step="0.05"
-                value={threshold}
-                onChange={(e) => setThreshold(parseFloat(e.target.value))}
-                style={{ width: '100%', accentColor: '#d3e3bb' }}
+                value={MATCH_THRESHOLD}
+                disabled
+                style={{ width: '100%', accentColor: '#d3e3bb', opacity: 0.55 }}
               />
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: 'rgba(255,255,255,0.44)', marginTop: '0.2rem' }}>
                 <span>Strict (0.60)</span>
                 <span>Balanced (1.00)</span>
                 <span>Permissive (1.40)</span>
               </div>
+              <p style={{ margin: '0.4rem 0 0', fontSize: '0.72rem', color: 'rgba(255,255,255,0.44)', lineHeight: 1.5 }}>
+                Locked at the SFace operating point. The decision boundary cannot be widened to force a match.
+              </p>
             </div>
 
             {/* The hint is only genuinely optional when a reverse-image
@@ -376,21 +395,31 @@ export function SocialDiscoveryPipeline() {
                 </div>
               </details>
             )}
+
+            <label style={{ display: 'flex', gap: '0.55rem', alignItems: 'flex-start', marginTop: '0.9rem', color: 'rgba(255,255,255,0.62)', fontSize: '0.76rem', lineHeight: 1.45, cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={authorizedUse}
+                onChange={(event) => setAuthorizedUse(event.target.checked)}
+                style={{ marginTop: '0.16rem', accentColor: '#d3e3bb' }}
+              />
+              <span>I am authorized to use this image and will use results only as an investigatory lead, not as a sole basis for a decision.</span>
+            </label>
           </div>
 
           <button
-            disabled={loading || !inputImage}
+            disabled={loading || !inputImage || !authorizedUse}
             onClick={executePipeline}
             style={{
               width: '100%',
-              background: loading || !inputImage ? '#2c3125' : 'linear-gradient(135deg, #8fa877 0%, #6f8a55 100%)',
+              background: loading || !inputImage || !authorizedUse ? '#2c3125' : 'linear-gradient(135deg, #8fa877 0%, #6f8a55 100%)',
               color: '#ffffff',
               border: 'none',
               padding: '0.9rem',
               borderRadius: '10px',
               fontSize: '1rem',
               fontWeight: 500,
-              cursor: loading || !inputImage ? 'not-allowed' : 'pointer',
+              cursor: loading || !inputImage || !authorizedUse ? 'not-allowed' : 'pointer',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -654,6 +683,18 @@ export function SocialDiscoveryPipeline() {
                   </div>
                 </div>
 
+                <div>
+                  <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.44)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Verified Media SHA-256</span>
+                  <code style={{ display: 'block', marginTop: '0.3rem', color: '#d3e3bb', fontSize: '0.72rem', overflowWrap: 'anywhere' }}>
+                    {result.discovered_post.media_sha256 || 'Unavailable'}
+                  </code>
+                  {result.discovered_post.discovery_source && (
+                    <span style={{ display: 'block', marginTop: '0.25rem', color: 'rgba(255,255,255,0.44)', fontSize: '0.72rem' }}>
+                      Discovery: {result.discovered_post.discovery_source}
+                    </span>
+                  )}
+                </div>
+
                 {/* BIOMETRIC METRICS BAR */}
                 <div
                   style={{
@@ -675,7 +716,7 @@ export function SocialDiscoveryPipeline() {
                   </div>
                   <div>
                     <span style={{ color: 'rgba(255,255,255,0.44)' }}>Threshold: </span>
-                    <strong style={{ color: '#d3e3bb' }}>{threshold}</strong>
+                    <strong style={{ color: '#d3e3bb' }}>{MATCH_THRESHOLD}</strong>
                   </div>
                 </div>
               </div>
