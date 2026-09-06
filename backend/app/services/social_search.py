@@ -296,6 +296,8 @@ async def run_social_search_and_verification_pipeline(
             "title": match.title,
             "description": match.description,
             "image_url": match.image_url,
+            "media_sha256": match.media_sha256,
+            "discovery_source": match.source,
         },
         "verification_metrics": {
             "similarity_percentage": match.similarity_pct,
@@ -351,6 +353,8 @@ async def run_social_search_and_verification_pipeline(
             "title": match.title,
             "description": match.description,
             "image_url": match.image_url,
+            "media_sha256": match.media_sha256,
+            "discovery_source": match.source,
             "post_face_crop_base64": match.face_crop_b64,
         },
         "metrics": {
