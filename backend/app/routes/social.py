@@ -15,6 +15,10 @@ router = APIRouter(prefix="/api/social", tags=["Social Media Pipeline"])
 class SocialSearchRequest(BaseModel):
     image: str = Field(..., description="Base64 encoded input face scan / camera frame")
     query: Optional[str] = Field("", description="Optional search query (e.g. name or social handle)")
+    authorized_use: bool = Field(
+        ...,
+        description="Caller confirms they are authorized to search with this image.",
+    )
     # L2 distance. Default is SFace's published operating point; it is not a
     # dial to widen until a particular photo passes.
     threshold: Optional[float] = Field(
@@ -32,6 +36,11 @@ async def search_and_verify_endpoint(payload: SocialSearchRequest):
     Face Scan Input -> Web/Social Media Search -> Find Matching Post -> Blockchain Commitment & Re-verification.
     """
     try:
+        if not payload.authorized_use:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Confirm that you are authorized to use this image before starting a face search.",
+            )
         result = await run_social_search_and_verification_pipeline(
             face_input_b64=payload.image,
             search_query=payload.query or "",
@@ -58,6 +67,8 @@ async def search_and_verify_endpoint(payload: SocialSearchRequest):
                 }
             },
         }
+    except HTTPException:
+        raise
     except ValueError as ve:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
     except Exception as e:
